@@ -1,0 +1,30 @@
+If you want, I can now:
+
+Add CSV import/export for products.
+
+Add invoice/receipt printable view (simple HTML printer-friendly).
+
+Add simple search/autocomplete in POS (AJAX) for fast barcode lookup.
+
+Convert to Bootstrap or Tailwind for a different look.
+
+⭐ Modern Supermarket POS UI (HTML + CSS preview)
+👉 Structure:
+
+Left: Product search + item grid
+
+Center: Cart / Scanned items
+
+Right: Payment box (discount, total, pay amount, change)
+
+✔ Keyboard shortcuts (F1 pay, F2 delete)
+✔ User role restrictions (admin/cashier)
+✔ Daily sales report
+✔ Inventory auto-reduce on sale
+
+✔ Save sales + items to database
+✔ Auto reduce stock
+✔ Receipt printing
+✔ Separate cashier + admin login
+✔ User roles
+✔ Reports
