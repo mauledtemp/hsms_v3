@@ -25,6 +25,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['role'] = $user['role'];
         $_SESSION['login_time'] = time();
         
+        // Track login activity
+        logActivity($user['id'], 'login', 'User logged in', 'login.php');
+        startUserSession($user['id']);
+        
         header('Location: index.php');
         exit;
     } else {
@@ -43,8 +47,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <body>
     <div class="login-container">
         <div class="login-box">
-            <h1>🔧 HSMS</h1>
-            <p>Hardware Store Management</p>
+            <h1>🔧 <?php echo SITE_ABBR; ?></h1>
+            <p><?php echo SITE_NAME; ?></p>
             
             <?php if ($error): ?>
                 <div class="alert alert-danger"><?php echo $error; ?></div>

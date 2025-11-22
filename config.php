@@ -6,9 +6,9 @@ define('DB_PASS', '');
 define('DB_NAME', 'yahya_store');
 
 // System Configuration
-define('SITE_NAME', 'Hardware Store Management System');
-define('CURRENCY', 'TZS');
-
+define('SITE_NAME', 'Hardware Store Management System'); // Full name
+define('SITE_ABBR', 'DARAJANI-HSMS'); // Short name/logo
+define('CURRENCY', 'TZS'); // Currency
 // Session Configuration
 ini_set('session.cookie_httponly', 1);
 session_start();

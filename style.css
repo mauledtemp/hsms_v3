@@ -416,3 +416,112 @@ table tr:hover {
         grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
     }
 }
+
+/* Notifications */
+.notification-badge {
+    position: absolute;
+    top: 5px;
+    right: 10px;
+    background: #ef4444;
+    color: white;
+    border-radius: 12px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: bold;
+    min-width: 20px;
+    text-align: center;
+    animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+}
+
+.notification-panel {
+    position: fixed;
+    right: 20px;
+    top: 20px;
+    width: 400px;
+    max-height: 600px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+    z-index: 2000;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.notification-header {
+    padding: 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--primary);
+    color: white;
+}
+
+.notification-header h3 {
+    margin: 0;
+    font-size: 18px;
+}
+
+.notification-list {
+    overflow-y: auto;
+    max-height: 500px;
+}
+
+.notification-item {
+    padding: 15px 20px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.notification-item:hover {
+    background: var(--light);
+}
+
+.notification-item.unread {
+    background: #eff6ff;
+    border-left: 4px solid var(--primary);
+}
+
+.notification-item .notification-title {
+    font-weight: bold;
+    margin-bottom: 5px;
+    color: var(--dark);
+}
+
+.notification-item .notification-message {
+    font-size: 14px;
+    color: var(--secondary);
+    margin-bottom: 5px;
+}
+
+.notification-item .notification-time {
+    font-size: 12px;
+    color: var(--secondary);
+}
+
+.notification-item.type-sale .notification-title::before {
+    content: "💰 ";
+}
+
+.notification-item.type-low_stock .notification-title::before {
+    content: "⚠️ ";
+}
+
+.notification-item.type-system .notification-title::before {
+    content: "ℹ️ ";
+}
+
+@media (max-width: 500px) {
+    .notification-panel {
+        right: 10px;
+        left: 10px;
+        width: auto;
+    }
+}

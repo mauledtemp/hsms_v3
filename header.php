@@ -2,6 +2,25 @@
 require_once 'config.php';
 require_once 'functions.php';
 requireLogin();
+
+// Auto-create notifications table if it doesn't exist
+$conn = getDBConnection();
+$table_check = $conn->query("SHOW TABLES LIKE 'notifications'");
+if ($table_check->num_rows == 0) {
+    $conn->query("CREATE TABLE notifications (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT,
+        type ENUM('sale', 'low_stock', 'system') NOT NULL,
+        title VARCHAR(200) NOT NULL,
+        message TEXT NOT NULL,
+        link VARCHAR(200),
+        is_read TINYINT(1) DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id),
+        INDEX idx_user_read (user_id, is_read),
+        INDEX idx_created (created_at)
+    )");
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -15,7 +34,7 @@ requireLogin();
     <div class="container">
         <aside class="sidebar">
             <div class="sidebar-header">
-                <h2>🔧 HSMS</h2>
+                <h2>DARAJANI,HSMS</h2>
                 <div class="user-info">
                     <?php echo isset($_SESSION['full_name']) ? $_SESSION['full_name'] : 'User'; ?><br>
                     <span style="text-transform: capitalize;"><?php echo isset($_SESSION['role']) ? $_SESSION['role'] : 'guest'; ?></span>
@@ -33,8 +52,26 @@ requireLogin();
                     <li><a href="users.php" class="<?php echo basename($_SERVER['PHP_SELF']) == 'users.php' ? 'active' : ''; ?>">👥 Users</a></li>
                 <?php endif; ?>
                 
+                <li style="border-top: 1px solid rgba(255,255,255,0.1); margin-top: 10px; padding-top: 10px;">
+                    <a href="#" onclick="toggleNotifications(); return false;" style="position: relative;">
+                        🔔 Notifications
+                        <span id="notificationBadge" class="notification-badge" style="display: none;">0</span>
+                    </a>
+                </li>
+                
                 <li><a href="logout.php">🚪 Logout</a></li>
             </ul>
         </aside>
+        
+        <!-- Notification Panel -->
+        <div id="notificationPanel" class="notification-panel" style="display: none;">
+            <div class="notification-header">
+                <h3>Notifications</h3>
+                <button onclick="markAllAsRead()" class="btn btn-sm btn-secondary">Mark all read</button>
+            </div>
+            <div id="notificationList" class="notification-list">
+                <p style="text-align: center; padding: 20px; color: var(--secondary);">Loading...</p>
+            </div>
+        </div>
         
         <main class="main-content">
