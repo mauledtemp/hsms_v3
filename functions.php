@@ -194,19 +194,37 @@ function createSale($user_id, $customer_name, $items, $total_amount, $payment_me
     try {
         $sale_number = generateSaleNumber();
         
+        // Calculate total cost and profit
+        $total_cost = 0;
+        $total_profit = 0;
+        
+        foreach ($items as $item) {
+            $product = getProductById($item['product_id']);
+            $buying_price = isset($product['buying_price']) ? $product['buying_price'] : 0;
+            $item_cost = $buying_price * $item['quantity'];
+            $item_profit = ($item['unit_price'] - $buying_price) * $item['quantity'];
+            
+            $total_cost += $item_cost;
+            $total_profit += $item_profit;
+        }
+        
         // Insert sale
-        $stmt = $conn->prepare("INSERT INTO sales (sale_number, user_id, customer_name, total_amount, payment_method) VALUES (?, ?, ?, ?, ?)");
-        $stmt->bind_param("sisds", $sale_number, $user_id, $customer_name, $total_amount, $payment_method);
+        $stmt = $conn->prepare("INSERT INTO sales (sale_number, user_id, customer_name, total_amount, total_cost, total_profit, payment_method) VALUES (?, ?, ?, ?, ?, ?, ?)");
+        $stmt->bind_param("sisddds", $sale_number, $user_id, $customer_name, $total_amount, $total_cost, $total_profit, $payment_method);
         $stmt->execute();
         $sale_id = $conn->insert_id;
         
         // Insert sale items and update stock
-        $stmt_item = $conn->prepare("INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, subtotal) VALUES (?, ?, ?, ?, ?)");
+        $stmt_item = $conn->prepare("INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, buying_price, subtotal, profit) VALUES (?, ?, ?, ?, ?, ?, ?)");
         $stmt_stock = $conn->prepare("UPDATE products SET stock_quantity = stock_quantity - ? WHERE id = ?");
         
         foreach ($items as $item) {
+            $product = getProductById($item['product_id']);
+            $buying_price = isset($product['buying_price']) ? $product['buying_price'] : 0;
             $subtotal = $item['quantity'] * $item['unit_price'];
-            $stmt_item->bind_param("iiidd", $sale_id, $item['product_id'], $item['quantity'], $item['unit_price'], $subtotal);
+            $profit = ($item['unit_price'] - $buying_price) * $item['quantity'];
+            
+            $stmt_item->bind_param("iiidddd", $sale_id, $item['product_id'], $item['quantity'], $item['unit_price'], $buying_price, $subtotal, $profit);
             $stmt_item->execute();
             
             $stmt_stock->bind_param("ii", $item['quantity'], $item['product_id']);
@@ -239,10 +257,10 @@ function getSaleDetails($sale_id) {
     return $result->fetch_all(MYSQLI_ASSOC);
 }
 
-function getSaleByNumber($sale_number) {
+function getSaleByNumber($sale_id) {
     $conn = getDBConnection();
-    $stmt = $conn->prepare("SELECT s.*, u.full_name as cashier_name FROM sales s LEFT JOIN users u ON s.user_id = u.id WHERE s.sale_number = ?");
-    $stmt->bind_param("s", $sale_number);
+    $stmt = $conn->prepare("SELECT s.*, u.full_name as cashier_name FROM sales s LEFT JOIN users u ON s.user_id = u.id WHERE s.id = ?");
+    $stmt->bind_param("i", $sale_id);
     $stmt->execute();
     $result = $stmt->get_result();
     return $result->fetch_assoc();
@@ -257,9 +275,23 @@ function getTotalSalesToday() {
     return $row['total'];
 }
 
+function getTotalProfitToday() {
+    $conn = getDBConnection();
+    $result = $conn->query("SELECT COALESCE(SUM(total_profit), 0) as total FROM sales WHERE DATE(sale_date) = CURDATE()");
+    $row = $result->fetch_assoc();
+    return $row['total'];
+}
+
 function getTotalSalesThisMonth() {
     $conn = getDBConnection();
     $result = $conn->query("SELECT COALESCE(SUM(total_amount), 0) as total FROM sales WHERE MONTH(sale_date) = MONTH(CURDATE()) AND YEAR(sale_date) = YEAR(CURDATE())");
+    $row = $result->fetch_assoc();
+    return $row['total'];
+}
+
+function getTotalProfitThisMonth() {
+    $conn = getDBConnection();
+    $result = $conn->query("SELECT COALESCE(SUM(total_profit), 0) as total FROM sales WHERE MONTH(sale_date) = MONTH(CURDATE()) AND YEAR(sale_date) = YEAR(CURDATE())");
     $row = $result->fetch_assoc();
     return $row['total'];
 }
@@ -276,6 +308,78 @@ function getLowStockCount() {
     $result = $conn->query("SELECT COUNT(*) as total FROM products WHERE stock_quantity <= reorder_level AND status = 'active'");
     $row = $result->fetch_assoc();
     return $row['total'];
+}
+
+function getProfitData($period = 'weekly') {
+    $conn = getDBConnection();
+    $data = [];
+    
+    switch ($period) {
+        case 'weekly':
+            // Last 7 days
+            $query = "SELECT DATE(sale_date) as date, COALESCE(SUM(total_profit), 0) as profit, COALESCE(SUM(total_amount), 0) as sales 
+                      FROM sales 
+                      WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+                      GROUP BY DATE(sale_date)
+                      ORDER BY date ASC";
+            break;
+            
+        case 'monthly':
+            // Last 30 days
+            $query = "SELECT DATE(sale_date) as date, COALESCE(SUM(total_profit), 0) as profit, COALESCE(SUM(total_amount), 0) as sales 
+                      FROM sales 
+                      WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+                      GROUP BY DATE(sale_date)
+                      ORDER BY date ASC";
+            break;
+            
+        case 'three_months':
+            // Last 12 weeks (grouped by week)
+            $query = "SELECT DATE_FORMAT(sale_date, '%Y-%m-%d') as date, 
+                      COALESCE(SUM(total_profit), 0) as profit, 
+                      COALESCE(SUM(total_amount), 0) as sales
+                      FROM sales 
+                      WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 3 MONTH)
+                      GROUP BY YEARWEEK(sale_date)
+                      ORDER BY date ASC";
+            break;
+            
+        case 'six_months':
+            // Last 6 months (grouped by month)
+            $query = "SELECT DATE_FORMAT(sale_date, '%Y-%m-01') as date, 
+                      COALESCE(SUM(total_profit), 0) as profit, 
+                      COALESCE(SUM(total_amount), 0) as sales 
+                      FROM sales 
+                      WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
+                      GROUP BY DATE_FORMAT(sale_date, '%Y-%m')
+                      ORDER BY date ASC";
+            break;
+            
+        case 'yearly':
+            // Last 12 months (grouped by month)
+            $query = "SELECT DATE_FORMAT(sale_date, '%Y-%m-01') as date, 
+                      COALESCE(SUM(total_profit), 0) as profit, 
+                      COALESCE(SUM(total_amount), 0) as sales 
+                      FROM sales 
+                      WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
+                      GROUP BY DATE_FORMAT(sale_date, '%Y-%m')
+                      ORDER BY date ASC";
+            break;
+            
+        default:
+            $query = "SELECT DATE(sale_date) as date, COALESCE(SUM(total_profit), 0) as profit, COALESCE(SUM(total_amount), 0) as sales 
+                      FROM sales 
+                      WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+                      GROUP BY DATE(sale_date)
+                      ORDER BY date ASC";
+    }
+    
+    $result = $conn->query($query);
+    while ($row = $result->fetch_assoc()) {
+        $data[] = $row;
+    }
+    
+    return $data;
 }
 
 // ==================== UTILITY FUNCTIONS ====================

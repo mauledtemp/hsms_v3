@@ -1,230 +1,404 @@
 <?php
-$page_title = 'Products';
-include 'header.php';
+// All System Functions in One Place
 
-$message = '';
-$message_type = '';
-$edit_product = null;
+// ==================== AUTHENTICATION FUNCTIONS ====================
 
-// Check and update database schema if needed
-$conn = getDBConnection();
-$columns = $conn->query("SHOW COLUMNS FROM products LIKE 'buying_price'");
-if ($columns->num_rows == 0) {
-    // Add new columns
-    $conn->query("ALTER TABLE products ADD COLUMN buying_price DECIMAL(10,2) DEFAULT 0 AFTER unit");
-    $conn->query("ALTER TABLE products ADD COLUMN selling_price DECIMAL(10,2) DEFAULT 0 AFTER buying_price");
+function authenticateUser($username, $password) {
+    $conn = getDBConnection();
+    $stmt = $conn->prepare("SELECT id, password, full_name, role FROM users WHERE username = ? AND status = 'active'");
+    $stmt->bind_param("s", $username);
+    $stmt->execute();
+    $result = $stmt->get_result();
     
-    // Copy old price to selling_price if price column exists
-    $price_col = $conn->query("SHOW COLUMNS FROM products LIKE 'price'");
-    if ($price_col->num_rows > 0) {
-        $conn->query("UPDATE products SET selling_price = price WHERE selling_price = 0");
-    }
-}
-
-// Handle form submissions
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (isset($_POST['add_product'])) {
-        $result = createProduct(
-            sanitizeInput($_POST['product_code']),
-            sanitizeInput($_POST['product_name']),
-            sanitizeInput($_POST['category']),
-            sanitizeInput($_POST['unit']),
-            floatval($_POST['buying_price']),
-            floatval($_POST['selling_price']),
-            intval($_POST['stock_quantity']),
-            intval($_POST['reorder_level']),
-            sanitizeInput($_POST['supplier'])
-        );
-        
-        if ($result) {
-            $message = 'Product added successfully!';
-            $message_type = 'success';
-        } else {
-            $message = 'Error adding product. Product code might already exist.';
-            $message_type = 'danger';
-        }
-    } elseif (isset($_POST['update_product'])) {
-        $result = updateProduct(
-            intval($_POST['product_id']),
-            sanitizeInput($_POST['product_name']),
-            sanitizeInput($_POST['category']),
-            sanitizeInput($_POST['unit']),
-            floatval($_POST['buying_price']),
-            floatval($_POST['selling_price']),
-            intval($_POST['stock_quantity']),
-            intval($_POST['reorder_level']),
-            sanitizeInput($_POST['supplier']),
-            sanitizeInput($_POST['status'])
-        );
-        
-        if ($result) {
-            $message = 'Product updated successfully!';
-            $message_type = 'success';
-        } else {
-            $message = 'Error updating product.';
-            $message_type = 'danger';
+    if ($result->num_rows === 1) {
+        $user = $result->fetch_assoc();
+        if (password_verify($password, $user['password'])) {
+            return $user;
         }
     }
+    return false;
 }
 
-// Handle delete
-if (isset($_GET['delete'])) {
-    $result = deleteProduct(intval($_GET['delete']));
-    if ($result) {
-        $message = 'Product deleted successfully!';
-        $message_type = 'success';
-    } else {
-        $message = 'Error deleting product.';
-        $message_type = 'danger';
+function isLoggedIn() {
+    return isset($_SESSION['user_id']);
+}
+
+function isAdmin() {
+    return isset($_SESSION['role']) && $_SESSION['role'] === 'admin';
+}
+
+function requireLogin() {
+    if (!isLoggedIn()) {
+        header('Location: login.php');
+        exit;
     }
 }
 
-// Handle edit
-if (isset($_GET['edit'])) {
-    $edit_product = getProductById(intval($_GET['edit']));
+function requireAdmin() {
+    requireLogin();
+    if (!isAdmin()) {
+        header('Location: index.php');
+        exit;
+    }
 }
 
-$products = getAllProducts();
+function logout() {
+    session_unset();
+    session_destroy();
+    header('Location: login.php');
+    exit;
+}
+
+// ==================== USER MANAGEMENT FUNCTIONS ====================
+
+function createUser($username, $password, $full_name, $role) {
+    $conn = getDBConnection();
+    $hashed_password = password_hash($password, PASSWORD_DEFAULT);
+    
+    $stmt = $conn->prepare("INSERT INTO users (username, password, full_name, role) VALUES (?, ?, ?, ?)");
+    $stmt->bind_param("ssss", $username, $hashed_password, $full_name, $role);
+    
+    return $stmt->execute();
+}
+
+function getAllUsers() {
+    $conn = getDBConnection();
+    $result = $conn->query("SELECT id, username, full_name, role, status, created_at FROM users ORDER BY created_at DESC");
+    return $result->fetch_all(MYSQLI_ASSOC);
+}
+
+function updateUser($id, $full_name, $role, $status) {
+    $conn = getDBConnection();
+    $stmt = $conn->prepare("UPDATE users SET full_name = ?, role = ?, status = ? WHERE id = ?");
+    $stmt->bind_param("sssi", $full_name, $role, $status, $id);
+    return $stmt->execute();
+}
+
+function deleteUser($id) {
+    $conn = getDBConnection();
+    // Don't allow deleting the default admin
+    $stmt = $conn->prepare("DELETE FROM users WHERE id = ? AND id != 1");
+    $stmt->bind_param("i", $id);
+    return $stmt->execute();
+}
+
+// ==================== PRODUCT MANAGEMENT FUNCTIONS ====================
+
+function createProduct($product_code, $product_name, $category, $unit, $buying_price, $selling_price, $stock_quantity, $reorder_level, $supplier) {
+    $conn = getDBConnection();
+    $stmt = $conn->prepare("INSERT INTO products (product_code, product_name, category, unit, buying_price, selling_price, stock_quantity, reorder_level, supplier) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    $stmt->bind_param("ssssddiis", $product_code, $product_name, $category, $unit, $buying_price, $selling_price, $stock_quantity, $reorder_level, $supplier);
+    return $stmt->execute();
+}
+
+function getAllProducts($active_only = false) {
+    $conn = getDBConnection();
+    $sql = "SELECT * FROM products";
+    if ($active_only) {
+        $sql .= " WHERE status = 'active'";
+    }
+    $sql .= " ORDER BY product_name ASC";
+    $result = $conn->query($sql);
+    return $result->fetch_all(MYSQLI_ASSOC);
+}
+
+function getProductById($id) {
+    $conn = getDBConnection();
+    $stmt = $conn->prepare("SELECT * FROM products WHERE id = ?");
+    $stmt->bind_param("i", $id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    return $result->fetch_assoc();
+}
+
+function updateProduct($id, $product_name, $category, $unit, $buying_price, $selling_price, $stock_quantity, $reorder_level, $supplier, $status) {
+    $conn = getDBConnection();
+    $stmt = $conn->prepare("UPDATE products SET product_name = ?, category = ?, unit = ?, buying_price = ?, selling_price = ?, stock_quantity = ?, reorder_level = ?, supplier = ?, status = ? WHERE id = ?");
+    $stmt->bind_param("sssddiissi", $product_name, $category, $unit, $buying_price, $selling_price, $stock_quantity, $reorder_level, $supplier, $status, $id);
+    return $stmt->execute();
+}
+
+function updateProductStock($id, $quantity) {
+    $conn = getDBConnection();
+    $stmt = $conn->prepare("UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?");
+    $stmt->bind_param("ii", $quantity, $id);
+    return $stmt->execute();
+}
+
+function deleteProduct($id) {
+    $conn = getDBConnection();
+    $stmt = $conn->prepare("DELETE FROM products WHERE id = ?");
+    $stmt->bind_param("i", $id);
+    return $stmt->execute();
+}
+
+function getLowStockProducts() {
+    $conn = getDBConnection();
+    $result = $conn->query("SELECT * FROM products WHERE stock_quantity <= reorder_level AND status = 'active' ORDER BY stock_quantity ASC");
+    return $result->fetch_all(MYSQLI_ASSOC);
+}
+
+// ==================== INVENTORY/STOCK MOVEMENT FUNCTIONS ====================
+
+function receiveStock($product_id, $quantity, $buying_price, $user_id, $reference_number = '', $notes = '') {
+    $conn = getDBConnection();
+    $conn->begin_transaction();
+    
+    try {
+        // Update product stock
+        $stmt = $conn->prepare("UPDATE products SET stock_quantity = stock_quantity + ?, buying_price = ? WHERE id = ?");
+        $stmt->bind_param("idi", $quantity, $buying_price, $product_id);
+        $stmt->execute();
+        
+        // Record stock movement
+        $stmt = $conn->prepare("INSERT INTO stock_movements (product_id, user_id, movement_type, quantity, buying_price, reference_number, notes) VALUES (?, ?, 'purchase', ?, ?, ?, ?)");
+        $stmt->bind_param("iiidss", $product_id, $user_id, $quantity, $buying_price, $reference_number, $notes);
+        $stmt->execute();
+        
+        $conn->commit();
+        return true;
+    } catch (Exception $e) {
+        $conn->rollback();
+        return false;
+    }
+}
+
+function getStockMovements($limit = 50) {
+    $conn = getDBConnection();
+    $stmt = $conn->prepare("SELECT sm.*, p.product_code, p.product_name, u.full_name as user_name FROM stock_movements sm LEFT JOIN products p ON sm.product_id = p.id LEFT JOIN users u ON sm.user_id = u.id ORDER BY sm.movement_date DESC LIMIT ?");
+    $stmt->bind_param("i", $limit);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    return $result->fetch_all(MYSQLI_ASSOC);
+}
+
+function getProductStockMovements($product_id, $limit = 20) {
+    $conn = getDBConnection();
+    $stmt = $conn->prepare("SELECT sm.*, u.full_name as user_name FROM stock_movements sm LEFT JOIN users u ON sm.user_id = u.id WHERE sm.product_id = ? ORDER BY sm.movement_date DESC LIMIT ?");
+    $stmt->bind_param("ii", $product_id, $limit);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    return $result->fetch_all(MYSQLI_ASSOC);
+}
+
+// ==================== SALES FUNCTIONS ====================
+
+function generateSaleNumber() {
+    return 'SALE-' . date('Ymd') . '-' . strtoupper(substr(uniqid(), -6));
+}
+
+function createSale($user_id, $customer_name, $items, $total_amount, $payment_method) {
+    $conn = getDBConnection();
+    $conn->begin_transaction();
+    
+    try {
+        $sale_number = generateSaleNumber();
+        
+        // Calculate total cost and profit
+        $total_cost = 0;
+        $total_profit = 0;
+        
+        foreach ($items as $item) {
+            $product = getProductById($item['product_id']);
+            $buying_price = isset($product['buying_price']) ? $product['buying_price'] : 0;
+            $item_cost = $buying_price * $item['quantity'];
+            $item_profit = ($item['unit_price'] - $buying_price) * $item['quantity'];
+            
+            $total_cost += $item_cost;
+            $total_profit += $item_profit;
+        }
+        
+        // Insert sale
+        $stmt = $conn->prepare("INSERT INTO sales (sale_number, user_id, customer_name, total_amount, total_cost, total_profit, payment_method) VALUES (?, ?, ?, ?, ?, ?, ?)");
+        $stmt->bind_param("sisddds", $sale_number, $user_id, $customer_name, $total_amount, $total_cost, $total_profit, $payment_method);
+        $stmt->execute();
+        $sale_id = $conn->insert_id;
+        
+        // Insert sale items and update stock
+        $stmt_item = $conn->prepare("INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, buying_price, subtotal, profit) VALUES (?, ?, ?, ?, ?, ?, ?)");
+        $stmt_stock = $conn->prepare("UPDATE products SET stock_quantity = stock_quantity - ? WHERE id = ?");
+        
+        foreach ($items as $item) {
+            $product = getProductById($item['product_id']);
+            $buying_price = isset($product['buying_price']) ? $product['buying_price'] : 0;
+            $subtotal = $item['quantity'] * $item['unit_price'];
+            $profit = ($item['unit_price'] - $buying_price) * $item['quantity'];
+            
+            $stmt_item->bind_param("iiidddd", $sale_id, $item['product_id'], $item['quantity'], $item['unit_price'], $buying_price, $subtotal, $profit);
+            $stmt_item->execute();
+            
+            $stmt_stock->bind_param("ii", $item['quantity'], $item['product_id']);
+            $stmt_stock->execute();
+        }
+        
+        $conn->commit();
+        return $sale_number;
+    } catch (Exception $e) {
+        $conn->rollback();
+        return false;
+    }
+}
+
+function getAllSales($limit = 100) {
+    $conn = getDBConnection();
+    $stmt = $conn->prepare("SELECT s.*, u.full_name as cashier_name FROM sales s LEFT JOIN users u ON s.user_id = u.id ORDER BY s.sale_date DESC LIMIT ?");
+    $stmt->bind_param("i", $limit);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    return $result->fetch_all(MYSQLI_ASSOC);
+}
+
+function getSaleDetails($sale_id) {
+    $conn = getDBConnection();
+    $stmt = $conn->prepare("SELECT si.*, p.product_name, p.product_code FROM sale_items si LEFT JOIN products p ON si.product_id = p.id WHERE si.sale_id = ?");
+    $stmt->bind_param("i", $sale_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    return $result->fetch_all(MYSQLI_ASSOC);
+}
+
+function getSaleByNumber($sale_number) {
+    $conn = getDBConnection();
+    $stmt = $conn->prepare("SELECT s.*, u.full_name as cashier_name FROM sales s LEFT JOIN users u ON s.user_id = u.id WHERE s.sale_number = ?");
+    $stmt->bind_param("s", $sale_number);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    return $result->fetch_assoc();
+}
+
+// ==================== DASHBOARD/STATISTICS FUNCTIONS ====================
+
+function getTotalSalesToday() {
+    $conn = getDBConnection();
+    $result = $conn->query("SELECT COALESCE(SUM(total_amount), 0) as total FROM sales WHERE DATE(sale_date) = CURDATE()");
+    $row = $result->fetch_assoc();
+    return $row['total'];
+}
+
+function getTotalProfitToday() {
+    $conn = getDBConnection();
+    $result = $conn->query("SELECT COALESCE(SUM(total_profit), 0) as total FROM sales WHERE DATE(sale_date) = CURDATE()");
+    $row = $result->fetch_assoc();
+    return $row['total'];
+}
+
+function getTotalSalesThisMonth() {
+    $conn = getDBConnection();
+    $result = $conn->query("SELECT COALESCE(SUM(total_amount), 0) as total FROM sales WHERE MONTH(sale_date) = MONTH(CURDATE()) AND YEAR(sale_date) = YEAR(CURDATE())");
+    $row = $result->fetch_assoc();
+    return $row['total'];
+}
+
+function getTotalProfitThisMonth() {
+    $conn = getDBConnection();
+    $result = $conn->query("SELECT COALESCE(SUM(total_profit), 0) as total FROM sales WHERE MONTH(sale_date) = MONTH(CURDATE()) AND YEAR(sale_date) = YEAR(CURDATE())");
+    $row = $result->fetch_assoc();
+    return $row['total'];
+}
+
+function getProfitData($period = 'weekly') {
+    $conn = getDBConnection();
+    $data = [];
+    
+    switch ($period) {
+        case 'weekly':
+            // Last 7 days
+            $query = "SELECT DATE(sale_date) as date, COALESCE(SUM(total_profit), 0) as profit, COALESCE(SUM(total_amount), 0) as sales 
+                      FROM sales 
+                      WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+                      GROUP BY DATE(sale_date)
+                      ORDER BY date ASC";
+            break;
+            
+        case 'monthly':
+            // Last 30 days
+            $query = "SELECT DATE(sale_date) as date, COALESCE(SUM(total_profit), 0) as profit, COALESCE(SUM(total_amount), 0) as sales 
+                      FROM sales 
+                      WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+                      GROUP BY DATE(sale_date)
+                      ORDER BY date ASC";
+            break;
+            
+        case 'three_months':
+            // Last 12 weeks (grouped by week)
+            $query = "SELECT DATE_FORMAT(sale_date, '%Y-%m-%d') as date, 
+                      COALESCE(SUM(total_profit), 0) as profit, 
+                      COALESCE(SUM(total_amount), 0) as sales,
+                      WEEK(sale_date) as week_num
+                      FROM sales 
+                      WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 3 MONTH)
+                      GROUP BY YEARWEEK(sale_date)
+                      ORDER BY date ASC";
+            break;
+            
+        case 'six_months':
+            // Last 6 months (grouped by month)
+            $query = "SELECT DATE_FORMAT(sale_date, '%Y-%m-01') as date, 
+                      COALESCE(SUM(total_profit), 0) as profit, 
+                      COALESCE(SUM(total_amount), 0) as sales 
+                      FROM sales 
+                      WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
+                      GROUP BY DATE_FORMAT(sale_date, '%Y-%m')
+                      ORDER BY date ASC";
+            break;
+            
+        case 'yearly':
+            // Last 12 months (grouped by month)
+            $query = "SELECT DATE_FORMAT(sale_date, '%Y-%m-01') as date, 
+                      COALESCE(SUM(total_profit), 0) as profit, 
+                      COALESCE(SUM(total_amount), 0) as sales 
+                      FROM sales 
+                      WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
+                      GROUP BY DATE_FORMAT(sale_date, '%Y-%m')
+                      ORDER BY date ASC";
+            break;
+            
+        default:
+            $query = "SELECT DATE(sale_date) as date, COALESCE(SUM(total_profit), 0) as profit, COALESCE(SUM(total_amount), 0) as sales 
+                      FROM sales 
+                      WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+                      GROUP BY DATE(sale_date)
+                      ORDER BY date ASC";
+    }
+    
+    $result = $conn->query($query);
+    while ($row = $result->fetch_assoc()) {
+        $data[] = $row;
+    }
+    
+    return $data;
+}
+
+function getTotalProducts() {
+    $conn = getDBConnection();
+    $result = $conn->query("SELECT COUNT(*) as total FROM products WHERE status = 'active'");
+    $row = $result->fetch_assoc();
+    return $row['total'];
+}
+
+function getLowStockCount() {
+    $conn = getDBConnection();
+    $result = $conn->query("SELECT COUNT(*) as total FROM products WHERE stock_quantity <= reorder_level AND status = 'active'");
+    $row = $result->fetch_assoc();
+    return $row['total'];
+}
+
+// ==================== INVENTORY/STOCK MOVEMENT FUNCTIONS ====================
+
+// ==================== UTILITY FUNCTIONS ====================
+
+function formatCurrency($amount) {
+    return CURRENCY . ' ' . number_format($amount, 2);
+}
+
+function sanitizeInput($data) {
+    $data = trim($data);
+    $data = stripslashes($data);
+    $data = htmlspecialchars($data);
+    return $data;
+}
+
+function showAlert($message, $type = 'success') {
+    return "<div class='alert alert-{$type}'>{$message}</div>";
+}
 ?>
-
-<h1>📦 Products Management</h1>
-
-<?php if ($message): ?>
-    <div class="alert alert-<?php echo $message_type; ?>"><?php echo $message; ?></div>
-<?php endif; ?>
-
-<div class="card" style="margin-bottom: 30px;">
-    <h2 style="margin-bottom: 20px;"><?php echo $edit_product ? 'Edit Product' : 'Add New Product'; ?></h2>
-    
-    <form method="POST">
-        <?php if ($edit_product): ?>
-            <input type="hidden" name="product_id" value="<?php echo $edit_product['id']; ?>">
-        <?php endif; ?>
-        
-        <div class="form-row">
-            <div class="form-group">
-                <label>Product Code *</label>
-                <input type="text" name="product_code" class="form-control" value="<?php echo $edit_product['product_code'] ?? ''; ?>" required <?php echo $edit_product ? 'readonly' : ''; ?>>
-            </div>
-            
-            <div class="form-group">
-                <label>Supplier</label>
-                <input type="text" name="supplier" class="form-control" value="<?php echo $edit_product['supplier'] ?? ''; ?>">
-            </div>
-            
-            <div class="form-group">
-                <label>Product Name *</label>
-                <input type="text" name="product_name" class="form-control" value="<?php echo $edit_product['product_name'] ?? ''; ?>" required>
-            </div>
-            
-            <div class="form-group">
-                <label>Category</label>
-                <input type="text" name="category" class="form-control" value="<?php echo $edit_product['category'] ?? ''; ?>">
-            </div>
-        </div>
-        
-        <div class="form-row">
-            <div class="form-group">
-                <label>Unit</label>
-                <input type="text" name="unit" class="form-control" value="<?php echo $edit_product['unit'] ?? 'pcs'; ?>" placeholder="pcs, kg, ltr, etc">
-            </div>
-            
-            <div class="form-group">
-                <label>Buying Price (<?php echo CURRENCY; ?>)</label>
-                <input type="number" step="0.01" name="buying_price" class="form-control" value="<?php echo $edit_product['buying_price'] ?? ''; ?>" placeholder="Cost price">
-            </div>
-            
-            <div class="form-group">
-                <label>Selling Price (<?php echo CURRENCY; ?>) *</label>
-                <input type="number" step="0.01" name="selling_price" class="form-control" value="<?php echo $edit_product['selling_price'] ?? ''; ?>" required>
-            </div>
-            
-            <div class="form-group">
-                <label>Stock Quantity *</label>
-                <input type="number" name="stock_quantity" class="form-control" value="<?php echo $edit_product['stock_quantity'] ?? '0'; ?>" required>
-            </div>
-        </div>
-        
-        <div class="form-row">
-            <div class="form-group">
-                <label>Reorder Level</label>
-                <input type="number" name="reorder_level" class="form-control" value="<?php echo $edit_product['reorder_level'] ?? '10'; ?>">
-            </div>
-            
-            <?php if ($edit_product): ?>
-            <div class="form-group">
-                <label>Status</label>
-                <select name="status" class="form-control">
-                    <option value="active" <?php echo ($edit_product['status'] ?? '') === 'active' ? 'selected' : ''; ?>>Active</option>
-                    <option value="inactive" <?php echo ($edit_product['status'] ?? '') === 'inactive' ? 'selected' : ''; ?>>Inactive</option>
-                </select>
-            </div>
-            <?php endif; ?>
-        </div>
-        
-        <div style="display: flex; gap: 10px;">
-            <button type="submit" name="<?php echo $edit_product ? 'update_product' : 'add_product'; ?>" class="btn btn-primary">
-                <?php echo $edit_product ? 'Update Product' : 'Add Product'; ?>
-            </button>
-            
-            <?php if ($edit_product): ?>
-                <a href="products.php" class="btn btn-secondary">Cancel</a>
-            <?php endif; ?>
-        </div>
-    </form>
-</div>
-
-<div class="card">
-    <h2 style="margin-bottom: 20px;">All Products</h2>
-    
-    <div class="table-container">
-        <table>
-            <thead>
-                <tr>
-                    <th>Code</th>
-                    <th>Name</th>
-                    <th>Category</th>
-                    <th>Buying Price</th>
-                    <th>Selling Price</th>
-                    <th>Stock</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php foreach ($products as $product): ?>
-                <?php 
-                    // Handle both old and new column names
-                    $buying_price = isset($product['buying_price']) ? $product['buying_price'] : 0;
-                    $selling_price = isset($product['selling_price']) ? $product['selling_price'] : (isset($product['price']) ? $product['price'] : 0);
-                ?>
-                <tr>
-                    <td><?php echo $product['product_code']; ?></td>
-                    <td><?php echo $product['product_name']; ?></td>
-                    <td><?php echo $product['category']; ?></td>
-                    <td><?php echo formatCurrency($buying_price); ?></td>
-                    <td><?php echo formatCurrency($selling_price); ?></td>
-                    <td>
-                        <?php if ($product['stock_quantity'] <= $product['reorder_level']): ?>
-                            <span class="badge badge-danger"><?php echo $product['stock_quantity']; ?></span>
-                        <?php else: ?>
-                            <span class="badge badge-success"><?php echo $product['stock_quantity']; ?></span>
-                        <?php endif; ?>
-                    </td>
-                    <td>
-                        <span class="badge badge-<?php echo $product['status'] === 'active' ? 'success' : 'danger'; ?>">
-                            <?php echo ucfirst($product['status']); ?>
-                        </span>
-                    </td>
-                    <td>
-                        <a href="products.php?edit=<?php echo $product['id']; ?>" class="btn btn-primary btn-sm">Edit</a>
-                        <a href="products.php?delete=<?php echo $product['id']; ?>" class="btn btn-danger btn-sm" onclick="return confirm('Delete this product?')">Delete</a>
-                    </td>
-                </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
-    </div>
-</div>
-
-<?php include 'footer.php'; ?>

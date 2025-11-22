@@ -1,0 +1,95 @@
+// ========================================================================
+// COPY ALL FUNCTIONS BELOW AND ADD TO YOUR functions.php FILE
+// Add them after getTotalSalesThisMonth() function
+// ========================================================================
+
+function getTotalProfitToday() {
+    $conn = getDBConnection();
+    $result = $conn->query("SELECT COALESCE(SUM(total_profit), 0) as total FROM sales WHERE DATE(sale_date) = CURDATE()");
+    $row = $result->fetch_assoc();
+    return $row['total'];
+}
+
+function getTotalProfitThisMonth() {
+    $conn = getDBConnection();
+    $result = $conn->query("SELECT COALESCE(SUM(total_profit), 0) as total FROM sales WHERE MONTH(sale_date) = MONTH(CURDATE()) AND YEAR(sale_date) = YEAR(CURDATE())");
+    $row = $result->fetch_assoc();
+    return $row['total'];
+}
+
+function getProfitData($period = 'weekly') {
+    $conn = getDBConnection();
+    $data = [];
+    
+    switch ($period) {
+        case 'weekly':
+            // Last 7 days
+            $query = "SELECT DATE(sale_date) as date, COALESCE(SUM(total_profit), 0) as profit, COALESCE(SUM(total_amount), 0) as sales 
+                      FROM sales 
+                      WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+                      GROUP BY DATE(sale_date)
+                      ORDER BY date ASC";
+            break;
+            
+        case 'monthly':
+            // Last 30 days
+            $query = "SELECT DATE(sale_date) as date, COALESCE(SUM(total_profit), 0) as profit, COALESCE(SUM(total_amount), 0) as sales 
+                      FROM sales 
+                      WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+                      GROUP BY DATE(sale_date)
+                      ORDER BY date ASC";
+            break;
+            
+        case 'three_months':
+            // Last 12 weeks (grouped by week)
+            $query = "SELECT DATE_FORMAT(sale_date, '%Y-%m-%d') as date, 
+                      COALESCE(SUM(total_profit), 0) as profit, 
+                      COALESCE(SUM(total_amount), 0) as sales,
+                      WEEK(sale_date) as week_num
+                      FROM sales 
+                      WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 3 MONTH)
+                      GROUP BY YEARWEEK(sale_date)
+                      ORDER BY date ASC";
+            break;
+            
+        case 'six_months':
+            // Last 6 months (grouped by month)
+            $query = "SELECT DATE_FORMAT(sale_date, '%Y-%m-01') as date, 
+                      COALESCE(SUM(total_profit), 0) as profit, 
+                      COALESCE(SUM(total_amount), 0) as sales 
+                      FROM sales 
+                      WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
+                      GROUP BY DATE_FORMAT(sale_date, '%Y-%m')
+                      ORDER BY date ASC";
+            break;
+            
+        case 'yearly':
+            // Last 12 months (grouped by month)
+            $query = "SELECT DATE_FORMAT(sale_date, '%Y-%m-01') as date, 
+                      COALESCE(SUM(total_profit), 0) as profit, 
+                      COALESCE(SUM(total_amount), 0) as sales 
+                      FROM sales 
+                      WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
+                      GROUP BY DATE_FORMAT(sale_date, '%Y-%m')
+                      ORDER BY date ASC";
+            break;
+            
+        default:
+            $query = "SELECT DATE(sale_date) as date, COALESCE(SUM(total_profit), 0) as profit, COALESCE(SUM(total_amount), 0) as sales 
+                      FROM sales 
+                      WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+                      GROUP BY DATE(sale_date)
+                      ORDER BY date ASC";
+    }
+    
+    $result = $conn->query($query);
+    while ($row = $result->fetch_assoc()) {
+        $data[] = $row;
+    }
+    
+    return $data;
+}
+
+// ========================================================================
+// END OF FUNCTIONS TO ADD
+// ========================================================================

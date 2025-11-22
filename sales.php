@@ -52,6 +52,18 @@ $sales = getAllSales(100);
                     <?php echo formatCurrency($view_sale['total_amount']); ?>
                 </span>
             </div>
+            <div>
+                <strong>Total Cost:</strong><br>
+                <span style="font-size: 18px; font-weight: bold; color: var(--secondary);">
+                    <?php echo formatCurrency($view_sale['total_cost']); ?>
+                </span>
+            </div>
+            <div>
+                <strong>Profit:</strong><br>
+                <span style="font-size: 20px; font-weight: bold; color: var(--success);">
+                    <?php echo formatCurrency($view_sale['total_profit']); ?>
+                </span>
+            </div>
         </div>
         
         <h3 style="margin-bottom: 15px;">Items Sold</h3>
