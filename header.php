@@ -21,6 +21,18 @@ if ($table_check->num_rows == 0) {
         INDEX idx_created (created_at)
     )");
 }
+
+// Track page view activity (only if function exists)
+if (function_exists('updateSessionActivity') && function_exists('logActivity')) {
+    $current_page = basename($_SERVER['PHP_SELF']);
+    updateSessionActivity();
+    
+    // Only log page views for main pages (not too frequently)
+    $important_pages = ['index.php', 'pos.php', 'products.php', 'sales.php', 'inventory.php', 'users.php', 'activity_report.php'];
+    if (in_array($current_page, $important_pages)) {
+        logActivity($_SESSION['user_id'], 'page_view', 'Viewed ' . $current_page, $_SERVER['REQUEST_URI']);
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -34,7 +46,7 @@ if ($table_check->num_rows == 0) {
     <div class="container">
         <aside class="sidebar">
             <div class="sidebar-header">
-                <h2>DARAJANI,HSMS</h2>
+                <h2>🔧 <?php echo SITE_ABBR; ?></h2>
                 <div class="user-info">
                     <?php echo isset($_SESSION['full_name']) ? $_SESSION['full_name'] : 'User'; ?><br>
                     <span style="text-transform: capitalize;"><?php echo isset($_SESSION['role']) ? $_SESSION['role'] : 'guest'; ?></span>
@@ -50,6 +62,7 @@ if ($table_check->num_rows == 0) {
                 
                 <?php if (isAdmin()): ?>
                     <li><a href="users.php" class="<?php echo basename($_SERVER['PHP_SELF']) == 'users.php' ? 'active' : ''; ?>">👥 Users</a></li>
+                    <li><a href="activity_report.php" class="<?php echo basename($_SERVER['PHP_SELF']) == 'activity_report.php' ? 'active' : ''; ?>">📊 Activity Report</a></li>
                 <?php endif; ?>
                 
                 <li style="border-top: 1px solid rgba(255,255,255,0.1); margin-top: 10px; padding-top: 10px;">

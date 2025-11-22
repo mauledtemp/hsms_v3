@@ -398,4 +398,160 @@ function sanitizeInput($data) {
 function showAlert($message, $type = 'success') {
     return "<div class='alert alert-{$type}'>{$message}</div>";
 }
+
+// ==================== ACTIVITY TRACKING FUNCTIONS ====================
+
+function logActivity($user_id, $activity_type, $description = '', $page_url = '') {
+    $conn = getDBConnection();
+    
+    // Auto-create activity_log table if it doesn't exist
+    $table_check = $conn->query("SHOW TABLES LIKE 'activity_log'");
+    if ($table_check->num_rows == 0) {
+        $conn->query("CREATE TABLE activity_log (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT,
+            username VARCHAR(50),
+            activity_type ENUM('login', 'logout', 'sale', 'product_add', 'product_edit', 'product_delete', 'inventory_receive', 'user_add', 'user_edit', 'user_delete', 'page_view') NOT NULL,
+            description TEXT,
+            page_url VARCHAR(200),
+            ip_address VARCHAR(45),
+            user_agent TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+            INDEX idx_user (user_id),
+            INDEX idx_type (activity_type),
+            INDEX idx_date (created_at)
+        )");
+    }
+    
+    // Get user info
+    $username = isset($_SESSION['full_name']) ? $_SESSION['full_name'] : 'Unknown';
+    $ip_address = $_SERVER['REMOTE_ADDR'];
+    $user_agent = $_SERVER['HTTP_USER_AGENT'];
+    
+    if (empty($page_url)) {
+        $page_url = $_SERVER['REQUEST_URI'];
+    }
+    
+    $stmt = $conn->prepare("INSERT INTO activity_log (user_id, username, activity_type, description, page_url, ip_address, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    $stmt->bind_param("issssss", $user_id, $username, $activity_type, $description, $page_url, $ip_address, $user_agent);
+    $stmt->execute();
+}
+
+function startUserSession($user_id) {
+    $conn = getDBConnection();
+    
+    // Auto-create user_sessions table if it doesn't exist
+    $table_check = $conn->query("SHOW TABLES LIKE 'user_sessions'");
+    if ($table_check->num_rows == 0) {
+        $conn->query("CREATE TABLE user_sessions (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT,
+            session_id VARCHAR(100) UNIQUE,
+            login_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            logout_time TIMESTAMP NULL,
+            ip_address VARCHAR(45),
+            user_agent TEXT,
+            is_active TINYINT(1) DEFAULT 1,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            INDEX idx_user_active (user_id, is_active),
+            INDEX idx_session (session_id)
+        )");
+    }
+    
+    $session_id = session_id();
+    $ip_address = $_SERVER['REMOTE_ADDR'];
+    $user_agent = $_SERVER['HTTP_USER_AGENT'];
+    
+    $stmt = $conn->prepare("INSERT INTO user_sessions (user_id, session_id, ip_address, user_agent) VALUES (?, ?, ?, ?)");
+    $stmt->bind_param("isss", $user_id, $session_id, $ip_address, $user_agent);
+    $stmt->execute();
+}
+
+function endUserSession() {
+    $conn = getDBConnection();
+    $session_id = session_id();
+    
+    $stmt = $conn->prepare("UPDATE user_sessions SET logout_time = NOW(), is_active = 0 WHERE session_id = ?");
+    $stmt->bind_param("s", $session_id);
+    $stmt->execute();
+}
+
+function updateSessionActivity() {
+    $conn = getDBConnection();
+    $session_id = session_id();
+    
+    // Check if table exists first
+    $table_check = $conn->query("SHOW TABLES LIKE 'user_sessions'");
+    if ($table_check->num_rows == 0) {
+        return; // Table doesn't exist yet, skip
+    }
+    
+    $stmt = $conn->prepare("UPDATE user_sessions SET last_activity = NOW() WHERE session_id = ?");
+    $stmt->bind_param("s", $session_id);
+    $stmt->execute();
+}
+
+function getActivityLog($user_id = null, $limit = 100) {
+    $conn = getDBConnection();
+    
+    // Check if table exists
+    $table_check = $conn->query("SHOW TABLES LIKE 'activity_log'");
+    if ($table_check->num_rows == 0) {
+        return []; // Return empty array if table doesn't exist
+    }
+    
+    if ($user_id) {
+        $stmt = $conn->prepare("SELECT * FROM activity_log WHERE user_id = ? ORDER BY created_at DESC LIMIT ?");
+        $stmt->bind_param("ii", $user_id, $limit);
+        $stmt->execute();
+        $result = $stmt->get_result();
+    } else {
+        $stmt = $conn->prepare("SELECT * FROM activity_log ORDER BY created_at DESC LIMIT ?");
+        $stmt->bind_param("i", $limit);
+        $stmt->execute();
+        $result = $stmt->get_result();
+    }
+    
+    return $result->fetch_all(MYSQLI_ASSOC);
+}
+
+function getActiveSessions() {
+    $conn = getDBConnection();
+    
+    // Check if table exists
+    $table_check = $conn->query("SHOW TABLES LIKE 'user_sessions'");
+    if ($table_check->num_rows == 0) {
+        return []; // Return empty array if table doesn't exist
+    }
+    
+    $result = $conn->query("SELECT us.*, u.full_name, u.role FROM user_sessions us LEFT JOIN users u ON us.user_id = u.id WHERE us.is_active = 1 ORDER BY us.last_activity DESC");
+    return $result->fetch_all(MYSQLI_ASSOC);
+}
+
+function getSessionStats($user_id = null) {
+    $conn = getDBConnection();
+    
+    // Check if table exists
+    $table_check = $conn->query("SHOW TABLES LIKE 'user_sessions'");
+    if ($table_check->num_rows == 0) {
+        return ['total_sessions' => 0, 'avg_duration' => 0];
+    }
+    
+    if ($user_id) {
+        $stmt = $conn->prepare("SELECT COUNT(*) as total_sessions, AVG(TIMESTAMPDIFF(MINUTE, login_time, COALESCE(logout_time, NOW()))) as avg_duration FROM user_sessions WHERE user_id = ?");
+        $stmt->bind_param("i", $user_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+    } else {
+        $result = $conn->query("SELECT COUNT(*) as total_sessions, AVG(TIMESTAMPDIFF(MINUTE, login_time, COALESCE(logout_time, NOW()))) as avg_duration FROM user_sessions");
+    }
+    
+    return $result->fetch_assoc();
+}
+
+// ========================================================================
+// END OF TRACKING FUNCTIONS
+// ========================================================================
 ?>

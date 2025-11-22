@@ -1,7 +1,7 @@
 -- Hardware Store Management System Database
 -- Run this in phpMyAdmin to create the database
 
-CREATE DATABASE IF NOT EXISTS hsms;
+CREATE DATABASE IF NOT EXISTS yahya_store;
 USE hsms;
 
 -- Users table
