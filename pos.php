@@ -42,9 +42,13 @@ $products = getAllProducts(true);
         <div class="product-grid" id="productGrid">
             <?php foreach ($products as $product): ?>
                 <?php if ($product['stock_quantity'] > 0): ?>
-                <div class="product-item" onclick="addToCart(<?php echo $product['id']; ?>, '<?php echo addslashes($product['product_name']); ?>', <?php echo $product['price']; ?>, <?php echo $product['stock_quantity']; ?>)">
+                <?php 
+                    // Handle both old 'price' and new 'selling_price' columns
+                    $price = isset($product['selling_price']) ? $product['selling_price'] : $product['price'];
+                ?>
+                <div class="product-item" onclick="addToCart(<?php echo $product['id']; ?>, '<?php echo addslashes($product['product_name']); ?>', <?php echo $price; ?>, <?php echo $product['stock_quantity']; ?>)">
                     <h4><?php echo $product['product_name']; ?></h4>
-                    <div class="price"><?php echo formatCurrency($product['price']); ?></div>
+                    <div class="price"><?php echo formatCurrency($price); ?></div>
                     <small>Stock: <?php echo $product['stock_quantity']; ?></small>
                 </div>
                 <?php endif; ?>
@@ -146,6 +150,27 @@ function updateQuantity(id, change) {
     }
 }
 
+function updateCartItemQuantity(id, newQty) {
+    newQty = parseInt(newQty);
+    
+    if (isNaN(newQty) || newQty < 1) {
+        alert('Please enter a valid quantity!');
+        updateCart();
+        return;
+    }
+    
+    const item = cart.find(item => item.product_id === id);
+    if (item) {
+        if (newQty <= item.max_stock) {
+            item.quantity = newQty;
+            updateCart();
+        } else {
+            alert('Not enough stock! Maximum available: ' + item.max_stock);
+            updateCart();
+        }
+    }
+}
+
 function updateCart() {
     const cartContainer = document.getElementById('cartItems');
     const cartTotal = document.getElementById('cartTotal');
@@ -171,12 +196,12 @@ function updateCart() {
         html += '<div style="flex: 1;">';
         html += '<div style="font-weight: 600;">' + item.name + '</div>';
         html += '<div style="font-size: 13px; color: var(--secondary);">';
-        html += formatCurrency(item.unit_price) + ' × ' + item.quantity;
+        html += formatCurrency(item.unit_price);
         html += '</div></div>';
         html += '<div style="display: flex; align-items: center; gap: 10px;">';
-        html += '<button onclick="updateQuantity(' + item.product_id + ', -1)" class="btn btn-sm btn-secondary" type="button">-</button>';
-        html += '<span style="font-weight: bold;">' + item.quantity + '</span>';
-        html += '<button onclick="updateQuantity(' + item.product_id + ', 1)" class="btn btn-sm btn-secondary" type="button">+</button>';
+        html += '<input type="number" value="' + item.quantity + '" min="1" max="' + item.max_stock + '" ';
+        html += 'onchange="updateCartItemQuantity(' + item.product_id + ', this.value)" ';
+        html += 'style="width: 70px; padding: 5px; text-align: center; border: 2px solid var(--border); border-radius: 5px; font-weight: bold;" />';
         html += '<button onclick="removeFromCart(' + item.product_id + ')" class="btn btn-sm btn-danger" type="button">×</button>';
         html += '</div></div>';
         html += '<div style="text-align: right; font-weight: bold; padding: 5px 0;">' + formatCurrency(subtotal) + '</div>';

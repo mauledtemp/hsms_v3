@@ -68,7 +68,7 @@ $recent_sales = getAllSales(10);
                     <td><span class="badge badge-danger"><?php echo $product['stock_quantity']; ?></span></td>
                     <td><?php echo $product['reorder_level']; ?></td>
                     <td>
-                        <a href="products.php?edit=<?php echo $product['id']; ?>" class="btn btn-primary btn-sm">Update Stock</a>
+                        <a href="inventory.php?product=<?php echo $product['id']; ?>" class="btn btn-primary btn-sm">Update Stock</a>
                     </td>
                 </tr>
                 <?php endforeach; ?>

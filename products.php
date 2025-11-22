@@ -6,6 +6,21 @@ $message = '';
 $message_type = '';
 $edit_product = null;
 
+// Check and update database schema if needed
+$conn = getDBConnection();
+$columns = $conn->query("SHOW COLUMNS FROM products LIKE 'buying_price'");
+if ($columns->num_rows == 0) {
+    // Add new columns
+    $conn->query("ALTER TABLE products ADD COLUMN buying_price DECIMAL(10,2) DEFAULT 0 AFTER unit");
+    $conn->query("ALTER TABLE products ADD COLUMN selling_price DECIMAL(10,2) DEFAULT 0 AFTER buying_price");
+    
+    // Copy old price to selling_price if price column exists
+    $price_col = $conn->query("SHOW COLUMNS FROM products LIKE 'price'");
+    if ($price_col->num_rows > 0) {
+        $conn->query("UPDATE products SET selling_price = price WHERE selling_price = 0");
+    }
+}
+
 // Handle form submissions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['add_product'])) {
@@ -14,7 +29,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             sanitizeInput($_POST['product_name']),
             sanitizeInput($_POST['category']),
             sanitizeInput($_POST['unit']),
-            floatval($_POST['price']),
+            floatval($_POST['buying_price']),
+            floatval($_POST['selling_price']),
             intval($_POST['stock_quantity']),
             intval($_POST['reorder_level']),
             sanitizeInput($_POST['supplier'])
@@ -33,7 +49,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             sanitizeInput($_POST['product_name']),
             sanitizeInput($_POST['category']),
             sanitizeInput($_POST['unit']),
-            floatval($_POST['price']),
+            floatval($_POST['buying_price']),
+            floatval($_POST['selling_price']),
             intval($_POST['stock_quantity']),
             intval($_POST['reorder_level']),
             sanitizeInput($_POST['supplier']),
@@ -46,43 +63,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $message = 'Error updating product.';
             $message_type = 'danger';
-        }
-    } elseif (isset($_POST['adjust_stock'])) {
-        $product_id = intval($_POST['product_id']);
-        $adjustment = intval($_POST['stock_adjustment']);
-        $adjustment_type = sanitizeInput($_POST['adjustment_type']);
-        
-        // Get current stock
-        $product = getProductById($product_id);
-        if ($product) {
-            $new_stock = $product['stock_quantity'];
-            
-            if ($adjustment_type === 'add') {
-                $new_stock += $adjustment;
-                $action = 'Added';
-            } else {
-                $new_stock -= $adjustment;
-                $action = 'Removed';
-            }
-            
-            // Prevent negative stock
-            if ($new_stock < 0) {
-                $message = 'Cannot remove more stock than available!';
-                $message_type = 'danger';
-            } else {
-                // Update stock
-                $conn = getDBConnection();
-                $stmt = $conn->prepare("UPDATE products SET stock_quantity = ? WHERE id = ?");
-                $stmt->bind_param("ii", $new_stock, $product_id);
-                
-                if ($stmt->execute()) {
-                    $message = $action . ' ' . $adjustment . ' units. New stock: ' . $new_stock;
-                    $message_type = 'success';
-                } else {
-                    $message = 'Error adjusting stock.';
-                    $message_type = 'danger';
-                }
-            }
         }
     }
 }
@@ -128,6 +108,11 @@ $products = getAllProducts();
             </div>
             
             <div class="form-group">
+                <label>Supplier</label>
+                <input type="text" name="supplier" class="form-control" value="<?php echo $edit_product['supplier'] ?? ''; ?>">
+            </div>
+            
+            <div class="form-group">
                 <label>Product Name *</label>
                 <input type="text" name="product_name" class="form-control" value="<?php echo $edit_product['product_name'] ?? ''; ?>" required>
             </div>
@@ -145,25 +130,25 @@ $products = getAllProducts();
             </div>
             
             <div class="form-group">
-                <label>Price (<?php echo CURRENCY; ?>) *</label>
-                <input type="number" step="0.01" name="price" class="form-control" value="<?php echo $edit_product['price'] ?? ''; ?>" required>
+                <label>Buying Price (<?php echo CURRENCY; ?>)</label>
+                <input type="number" step="0.01" name="buying_price" class="form-control" value="<?php echo $edit_product['buying_price'] ?? ''; ?>" placeholder="Cost price">
+            </div>
+            
+            <div class="form-group">
+                <label>Selling Price (<?php echo CURRENCY; ?>) *</label>
+                <input type="number" step="0.01" name="selling_price" class="form-control" value="<?php echo $edit_product['selling_price'] ?? ''; ?>" required>
             </div>
             
             <div class="form-group">
                 <label>Stock Quantity *</label>
                 <input type="number" name="stock_quantity" class="form-control" value="<?php echo $edit_product['stock_quantity'] ?? '0'; ?>" required>
             </div>
-            
-            <div class="form-group">
-                <label>Reorder Level</label>
-                <input type="number" name="reorder_level" class="form-control" value="<?php echo $edit_product['reorder_level'] ?? '10'; ?>">
-            </div>
         </div>
         
         <div class="form-row">
             <div class="form-group">
-                <label>Supplier</label>
-                <input type="text" name="supplier" class="form-control" value="<?php echo $edit_product['supplier'] ?? ''; ?>">
+                <label>Reorder Level</label>
+                <input type="number" name="reorder_level" class="form-control" value="<?php echo $edit_product['reorder_level'] ?? '10'; ?>">
             </div>
             
             <?php if ($edit_product): ?>
@@ -199,7 +184,8 @@ $products = getAllProducts();
                     <th>Code</th>
                     <th>Name</th>
                     <th>Category</th>
-                    <th>Price</th>
+                    <th>Buying Price</th>
+                    <th>Selling Price</th>
                     <th>Stock</th>
                     <th>Status</th>
                     <th>Actions</th>
@@ -207,11 +193,17 @@ $products = getAllProducts();
             </thead>
             <tbody>
                 <?php foreach ($products as $product): ?>
+                <?php 
+                    // Handle both old and new column names
+                    $buying_price = isset($product['buying_price']) ? $product['buying_price'] : 0;
+                    $selling_price = isset($product['selling_price']) ? $product['selling_price'] : (isset($product['price']) ? $product['price'] : 0);
+                ?>
                 <tr>
                     <td><?php echo $product['product_code']; ?></td>
                     <td><?php echo $product['product_name']; ?></td>
                     <td><?php echo $product['category']; ?></td>
-                    <td><?php echo formatCurrency($product['price']); ?></td>
+                    <td><?php echo formatCurrency($buying_price); ?></td>
+                    <td><?php echo formatCurrency($selling_price); ?></td>
                     <td>
                         <?php if ($product['stock_quantity'] <= $product['reorder_level']): ?>
                             <span class="badge badge-danger"><?php echo $product['stock_quantity']; ?></span>

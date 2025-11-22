@@ -84,10 +84,10 @@ function deleteUser($id) {
 
 // ==================== PRODUCT MANAGEMENT FUNCTIONS ====================
 
-function createProduct($product_code, $product_name, $category, $unit, $price, $stock_quantity, $reorder_level, $supplier) {
+function createProduct($product_code, $product_name, $category, $unit, $buying_price, $selling_price, $stock_quantity, $reorder_level, $supplier) {
     $conn = getDBConnection();
-    $stmt = $conn->prepare("INSERT INTO products (product_code, product_name, category, unit, price, stock_quantity, reorder_level, supplier) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-    $stmt->bind_param("ssssdiss", $product_code, $product_name, $category, $unit, $price, $stock_quantity, $reorder_level, $supplier);
+    $stmt = $conn->prepare("INSERT INTO products (product_code, product_name, category, unit, buying_price, selling_price, stock_quantity, reorder_level, supplier) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    $stmt->bind_param("ssssddiis", $product_code, $product_name, $category, $unit, $buying_price, $selling_price, $stock_quantity, $reorder_level, $supplier);
     return $stmt->execute();
 }
 
@@ -111,10 +111,10 @@ function getProductById($id) {
     return $result->fetch_assoc();
 }
 
-function updateProduct($id, $product_name, $category, $unit, $price, $stock_quantity, $reorder_level, $supplier, $status) {
+function updateProduct($id, $product_name, $category, $unit, $buying_price, $selling_price, $stock_quantity, $reorder_level, $supplier, $status) {
     $conn = getDBConnection();
-    $stmt = $conn->prepare("UPDATE products SET product_name = ?, category = ?, unit = ?, price = ?, stock_quantity = ?, reorder_level = ?, supplier = ?, status = ? WHERE id = ?");
-    $stmt->bind_param("sssdiissi", $product_name, $category, $unit, $price, $stock_quantity, $reorder_level, $supplier, $status, $id);
+    $stmt = $conn->prepare("UPDATE products SET product_name = ?, category = ?, unit = ?, buying_price = ?, selling_price = ?, stock_quantity = ?, reorder_level = ?, supplier = ?, status = ? WHERE id = ?");
+    $stmt->bind_param("sssddiissi", $product_name, $category, $unit, $buying_price, $selling_price, $stock_quantity, $reorder_level, $supplier, $status, $id);
     return $stmt->execute();
 }
 
@@ -135,6 +135,49 @@ function deleteProduct($id) {
 function getLowStockProducts() {
     $conn = getDBConnection();
     $result = $conn->query("SELECT * FROM products WHERE stock_quantity <= reorder_level AND status = 'active' ORDER BY stock_quantity ASC");
+    return $result->fetch_all(MYSQLI_ASSOC);
+}
+
+// ==================== INVENTORY/STOCK MOVEMENT FUNCTIONS ====================
+
+function receiveStock($product_id, $quantity, $buying_price, $user_id, $reference_number = '', $notes = '') {
+    $conn = getDBConnection();
+    $conn->begin_transaction();
+    
+    try {
+        // Update product stock
+        $stmt = $conn->prepare("UPDATE products SET stock_quantity = stock_quantity + ?, buying_price = ? WHERE id = ?");
+        $stmt->bind_param("idi", $quantity, $buying_price, $product_id);
+        $stmt->execute();
+        
+        // Record stock movement
+        $stmt = $conn->prepare("INSERT INTO stock_movements (product_id, user_id, movement_type, quantity, buying_price, reference_number, notes) VALUES (?, ?, 'purchase', ?, ?, ?, ?)");
+        $stmt->bind_param("iiidss", $product_id, $user_id, $quantity, $buying_price, $reference_number, $notes);
+        $stmt->execute();
+        
+        $conn->commit();
+        return true;
+    } catch (Exception $e) {
+        $conn->rollback();
+        return false;
+    }
+}
+
+function getStockMovements($limit = 50) {
+    $conn = getDBConnection();
+    $stmt = $conn->prepare("SELECT sm.*, p.product_code, p.product_name, u.full_name as user_name FROM stock_movements sm LEFT JOIN products p ON sm.product_id = p.id LEFT JOIN users u ON sm.user_id = u.id ORDER BY sm.movement_date DESC LIMIT ?");
+    $stmt->bind_param("i", $limit);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    return $result->fetch_all(MYSQLI_ASSOC);
+}
+
+function getProductStockMovements($product_id, $limit = 20) {
+    $conn = getDBConnection();
+    $stmt = $conn->prepare("SELECT sm.*, u.full_name as user_name FROM stock_movements sm LEFT JOIN users u ON sm.user_id = u.id WHERE sm.product_id = ? ORDER BY sm.movement_date DESC LIMIT ?");
+    $stmt->bind_param("ii", $product_id, $limit);
+    $stmt->execute();
+    $result = $stmt->get_result();
     return $result->fetch_all(MYSQLI_ASSOC);
 }
 
