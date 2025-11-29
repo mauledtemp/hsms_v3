@@ -303,6 +303,13 @@ $products = getAllProducts();
     </form>
 </div>
 
+<!-- Add this to products.php after the import section -->
+<div style="text-align: right; margin-bottom: 20px;">
+    <a href="export_products.php" class="btn btn-info">
+        📥 Export Products to CSV
+    </a>
+</div>
+
 <div class="card">
     <h2 style="margin-bottom: 20px;">All Products (<?php echo count($products); ?>)</h2>
     

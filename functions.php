@@ -895,3 +895,58 @@ function generateSampleCSV() {
         return false;
     }
 }
+
+// Add to functions.php
+function exportProductsToCSV() {
+    $products = getAllProducts();
+    $filename = 'products_export_' . date('Y-m-d') . '.csv';
+    
+    // Create CSV content
+    $csv = "Product Code,Product Name,Category,Unit,Buying Price,Selling Price,Stock Quantity,Reorder Level,Supplier,Status\n";
+    
+    foreach ($products as $product) {
+        $buying_price = isset($product['buying_price']) ? $product['buying_price'] : 0;
+        $selling_price = isset($product['selling_price']) ? $product['selling_price'] : (isset($product['price']) ? $product['price'] : 0);
+        
+        $csv .= implode(',', [
+            $product['product_code'],
+            $product['product_name'],
+            $product['category'],
+            $product['unit'],
+            $buying_price,
+            $selling_price,
+            $product['stock_quantity'],
+            $product['reorder_level'],
+            $product['supplier'],
+            $product['status']
+        ]) . "\n";
+    }
+    
+    if (file_put_contents($filename, $csv)) {
+        return $filename;
+    }
+    return false;
+}
+
+// Enhanced validation in importProductsFromCSV function
+function validateProductData($data) {
+    $errors = [];
+    
+    if (empty($data['product_code'])) {
+        $errors[] = "Product code is required";
+    }
+    
+    if (empty($data['product_name'])) {
+        $errors[] = "Product name is required";
+    }
+    
+    if ($data['selling_price'] <= 0) {
+        $errors[] = "Selling price must be greater than 0";
+    }
+    
+    if (!preg_match('/^[A-Za-z0-9_-]+$/', $data['product_code'])) {
+        $errors[] = "Product code can only contain letters, numbers, hyphens, and underscores";
+    }
+    
+    return $errors;
+}
