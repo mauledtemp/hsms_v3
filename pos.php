@@ -17,6 +17,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['complete_sale'])) {
         if ($sale_number) {
             $message = "Sale completed successfully! Sale Number: {$sale_number}";
             $message_type = 'success';
+            
+            // Debug: Check if notification was created
+            error_log("Sale created: {$sale_number}, checking notifications...");
+            $conn_check = getDBConnection();
+            $notif_check = $conn_check->query("SELECT COUNT(*) as count FROM notifications WHERE title LIKE '%{$sale_number}%'");
+            if ($notif_check) {
+                $count = $notif_check->fetch_assoc()['count'];
+                error_log("Notifications created: {$count}");
+            }
         } else {
             $message = "Error completing sale. Please try again.";
             $message_type = 'danger';

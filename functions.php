@@ -229,7 +229,20 @@ function createSale($user_id, $customer_name, $items, $total_amount, $payment_me
             
             $stmt_stock->bind_param("ii", $item['quantity'], $item['product_id']);
             $stmt_stock->execute();
+            
+            // Check if stock is now low after sale
+            $new_stock = $product['stock_quantity'] - $item['quantity'];
+            $reorder_level = $product['reorder_level'];
+            
+            // If stock dropped to or below reorder level, create notification
+            if ($new_stock <= $reorder_level && $product['stock_quantity'] > $reorder_level) {
+                // Stock just dropped below reorder level
+                createLowStockNotification($product['product_name'], $new_stock, $reorder_level);
+            }
         }
+        
+        // Create notification for all users
+        createSaleNotification($sale_number, $total_amount, $total_profit, $customer_name);
         
         $conn->commit();
         return $sale_number;
@@ -399,6 +412,108 @@ function showAlert($message, $type = 'success') {
     return "<div class='alert alert-{$type}'>{$message}</div>";
 }
 
+// ==================== NOTIFICATION FUNCTIONS ====================
+
+function createSaleNotification($sale_number, $total_amount, $profit, $customer_name) {
+    $conn = getDBConnection();
+    
+    // Check if notifications table exists
+    $table_check = $conn->query("SHOW TABLES LIKE 'notifications'");
+    if ($table_check->num_rows == 0) {
+        // Create table if it doesn't exist
+        $conn->query("CREATE TABLE notifications (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT,
+            type ENUM('sale', 'low_stock', 'system') NOT NULL,
+            title VARCHAR(200) NOT NULL,
+            message TEXT NOT NULL,
+            link VARCHAR(200),
+            is_read TINYINT(1) DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            INDEX idx_user_read (user_id, is_read),
+            INDEX idx_created (created_at)
+        )");
+    }
+    
+    // Get all active users
+    $users_result = $conn->query("SELECT id FROM users WHERE status = 'active'");
+    
+    if (!$users_result) {
+        error_log("Error getting users: " . $conn->error);
+        return false;
+    }
+    
+    $title = "New Sale: " . $sale_number;
+    $message = "Sale of " . formatCurrency($total_amount) . " (Profit: " . formatCurrency($profit) . ")";
+    if ($customer_name) {
+        $message .= " to " . $customer_name;
+    }
+    $link = "sales.php";
+    
+    $stmt = $conn->prepare("INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, 'sale', ?, ?, ?)");
+    
+    if (!$stmt) {
+        error_log("Notification prepare failed: " . $conn->error);
+        return false;
+    }
+    
+    $success_count = 0;
+    while ($user = $users_result->fetch_assoc()) {
+        $stmt->bind_param("isss", $user['id'], $title, $message, $link);
+        if ($stmt->execute()) {
+            $success_count++;
+        } else {
+            error_log("Notification insert failed: " . $stmt->error);
+        }
+    }
+    
+    error_log("Created {$success_count} sale notifications for sale {$sale_number}");
+    return $success_count > 0;
+}
+
+function createLowStockNotification($product_name, $current_stock, $reorder_level) {
+    $conn = getDBConnection();
+    
+    // Check if notifications table exists
+    $table_check = $conn->query("SHOW TABLES LIKE 'notifications'");
+    if ($table_check->num_rows == 0) {
+        return false; // Table doesn't exist
+    }
+    
+    // Get all admin users
+    $users_result = $conn->query("SELECT id FROM users WHERE status = 'active' AND role = 'admin'");
+    
+    if (!$users_result) {
+        error_log("Error getting admin users: " . $conn->error);
+        return false;
+    }
+    
+    $title = "Low Stock Alert: " . $product_name;
+    $message = "Stock level (" . $current_stock . ") is at or below reorder level (" . $reorder_level . "). Please restock soon!";
+    $link = "inventory.php";
+    
+    $stmt = $conn->prepare("INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, 'low_stock', ?, ?, ?)");
+    
+    if (!$stmt) {
+        error_log("Low stock notification prepare failed: " . $conn->error);
+        return false;
+    }
+    
+    $success_count = 0;
+    while ($user = $users_result->fetch_assoc()) {
+        $stmt->bind_param("isss", $user['id'], $title, $message, $link);
+        if ($stmt->execute()) {
+            $success_count++;
+        } else {
+            error_log("Low stock notification insert failed: " . $stmt->error);
+        }
+    }
+    
+    error_log("Created {$success_count} low stock notifications for {$product_name}");
+    return $success_count > 0;
+}
+
 // ==================== ACTIVITY TRACKING FUNCTIONS ====================
 
 function logActivity($user_id, $activity_type, $description = '', $page_url = '') {
@@ -482,12 +597,6 @@ function updateSessionActivity() {
     $conn = getDBConnection();
     $session_id = session_id();
     
-    // Check if table exists first
-    $table_check = $conn->query("SHOW TABLES LIKE 'user_sessions'");
-    if ($table_check->num_rows == 0) {
-        return; // Table doesn't exist yet, skip
-    }
-    
     $stmt = $conn->prepare("UPDATE user_sessions SET last_activity = NOW() WHERE session_id = ?");
     $stmt->bind_param("s", $session_id);
     $stmt->execute();
@@ -495,12 +604,6 @@ function updateSessionActivity() {
 
 function getActivityLog($user_id = null, $limit = 100) {
     $conn = getDBConnection();
-    
-    // Check if table exists
-    $table_check = $conn->query("SHOW TABLES LIKE 'activity_log'");
-    if ($table_check->num_rows == 0) {
-        return []; // Return empty array if table doesn't exist
-    }
     
     if ($user_id) {
         $stmt = $conn->prepare("SELECT * FROM activity_log WHERE user_id = ? ORDER BY created_at DESC LIMIT ?");
@@ -519,25 +622,12 @@ function getActivityLog($user_id = null, $limit = 100) {
 
 function getActiveSessions() {
     $conn = getDBConnection();
-    
-    // Check if table exists
-    $table_check = $conn->query("SHOW TABLES LIKE 'user_sessions'");
-    if ($table_check->num_rows == 0) {
-        return []; // Return empty array if table doesn't exist
-    }
-    
     $result = $conn->query("SELECT us.*, u.full_name, u.role FROM user_sessions us LEFT JOIN users u ON us.user_id = u.id WHERE us.is_active = 1 ORDER BY us.last_activity DESC");
     return $result->fetch_all(MYSQLI_ASSOC);
 }
 
 function getSessionStats($user_id = null) {
     $conn = getDBConnection();
-    
-    // Check if table exists
-    $table_check = $conn->query("SHOW TABLES LIKE 'user_sessions'");
-    if ($table_check->num_rows == 0) {
-        return ['total_sessions' => 0, 'avg_duration' => 0];
-    }
     
     if ($user_id) {
         $stmt = $conn->prepare("SELECT COUNT(*) as total_sessions, AVG(TIMESTAMPDIFF(MINUTE, login_time, COALESCE(logout_time, NOW()))) as avg_duration FROM user_sessions WHERE user_id = ?");
@@ -550,8 +640,4 @@ function getSessionStats($user_id = null) {
     
     return $result->fetch_assoc();
 }
-
-// ========================================================================
-// END OF TRACKING FUNCTIONS
-// ========================================================================
 ?>

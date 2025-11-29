@@ -1,0 +1,8 @@
+db_user: kiwanjachapco_theonlyone
+db_pass: @1234Rashid
+
+db_name: kiwanjachapco_theonlyone
+
+subdomain: theonlyone.kiwanjachap.co.tz
+doc Root: public_html/theonlyone.kiwanjachap.co.tz
+

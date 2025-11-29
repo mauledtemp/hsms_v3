@@ -69,8 +69,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </form>
             
             <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); font-size: 13px; color: var(--secondary); text-align: center;">
-                Default Username: admin<br>
-                Default Password: 25252525
             </div>
         </div>
     </div>
