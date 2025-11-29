@@ -10,22 +10,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['complete_sale'])) {
     $payment_method = sanitizeInput($_POST['payment_method']);
     $cart_items = json_decode($_POST['cart_data'], true);
     $total_amount = floatval($_POST['total_amount']);
+    $final_amount = floatval($_POST['final_amount']);
+    $discount_amount = floatval($_POST['discount_amount']);
+    $discount_percent = floatval($_POST['discount_percent']);
     
     if (!empty($cart_items) && $total_amount > 0) {
-        $sale_number = createSale($_SESSION['user_id'], $customer_name, $cart_items, $total_amount, $payment_method);
+        $sale_number = createSale($_SESSION['user_id'], $customer_name, $cart_items, $total_amount, $payment_method, $discount_amount, $discount_percent);
         
         if ($sale_number) {
             $message = "Sale completed successfully! Sale Number: {$sale_number}";
-            $message_type = 'success';
-            
-            // Debug: Check if notification was created
-            error_log("Sale created: {$sale_number}, checking notifications...");
-            $conn_check = getDBConnection();
-            $notif_check = $conn_check->query("SELECT COUNT(*) as count FROM notifications WHERE title LIKE '%{$sale_number}%'");
-            if ($notif_check) {
-                $count = $notif_check->fetch_assoc()['count'];
-                error_log("Notifications created: {$count}");
+            if ($discount_amount > 0) {
+                $message .= " (Discount: " . formatCurrency($discount_amount) . ")";
             }
+            $message_type = 'success';
         } else {
             $message = "Error completing sale. Please try again.";
             $message_type = 'danger';
@@ -71,10 +68,43 @@ $products = getAllProducts(true);
         <div id="cartItems"></div>
         
         <div class="cart-total">
-            <h3>
-                <span>Total:</span>
-                <span id="cartTotal"><?php echo formatCurrency(0); ?></span>
-            </h3>
+            <div class="total-breakdown">
+                <div class="total-row">
+                    <span>Subtotal:</span>
+                    <span id="cartSubtotal"><?php echo formatCurrency(0); ?></span>
+                </div>
+                
+                <div class="discount-section">
+                    <div class="form-row" style="margin-bottom: 10px;">
+                        <div class="form-group" style="flex: 1;">
+                            <label>Discount Type</label>
+                            <select id="discountType" class="form-control" onchange="updateDiscount()">
+                                <option value="none">No Discount</option>
+                                <option value="percentage">Percentage %</option>
+                                <option value="fixed">Fixed Amount</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group" style="flex: 1;">
+                            <label>Discount Value</label>
+                            <input type="number" step="0.01" id="discountValue" class="form-control" 
+                                   placeholder="0.00" oninput="updateDiscount()" disabled>
+                        </div>
+                    </div>
+                    
+                    <div id="discountDisplay" style="display: none;">
+                        <div class="total-row discount-row">
+                            <span>Discount:</span>
+                            <span id="discountAmount"><?php echo formatCurrency(0); ?></span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="total-row final-total">
+                    <span><strong>Total:</strong></span>
+                    <span id="cartTotal" style="font-size: 24px;"><?php echo formatCurrency(0); ?></span>
+                </div>
+            </div>
         </div>
         
         <form method="POST" id="saleForm" style="margin-top: 20px;">
@@ -83,18 +113,26 @@ $products = getAllProducts(true);
                 <input type="text" name="customer_name" class="form-control" placeholder="Walk-in customer">
             </div>
             
-            <div class="form-group">
-                <label>Payment Method</label>
-                <select name="payment_method" id="paymentMethod" class="form-control" required onchange="toggleReceivedAmount()">
-                    <option value="cash">Cash</option>
-                    <option value="card">Card</option>
-                    <option value="mobile">Mobile Money</option>
-                </select>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Payment Method</label>
+                    <select name="payment_method" id="paymentMethod" class="form-control" required onchange="toggleReceivedAmount()">
+                        <option value="cash">Cash</option>
+                        <option value="card">Card</option>
+                        <option value="mobile">Mobile Money</option>
+                    </select>
+                </div>
+                
+                <div class="form-group" style="display: none;">
+                    <input type="hidden" name="discount_amount" id="discountAmountInput">
+                    <input type="hidden" name="discount_percent" id="discountPercentInput">
+                </div>
             </div>
             
             <div class="form-group" id="receivedAmountGroup">
                 <label>Amount Received</label>
-                <input type="number" step="0.01" id="receivedAmount" class="form-control" placeholder="Enter amount received" oninput="calculateChange()">
+                <input type="number" step="0.01" id="receivedAmount" class="form-control" 
+                       placeholder="Enter amount received" oninput="calculateChange()">
             </div>
             
             <div id="changeDisplay" style="display: none; background: #f0f9ff; border: 2px solid #3b82f6; border-radius: 8px; padding: 15px; margin-bottom: 15px;">
@@ -106,16 +144,23 @@ $products = getAllProducts(true);
             
             <input type="hidden" name="cart_data" id="cartData">
             <input type="hidden" name="total_amount" id="totalAmount">
+            <input type="hidden" name="final_amount" id="finalAmount">
             <input type="hidden" name="complete_sale" value="1">
             
-            <button type="button" onclick="completeSale()" class="btn btn-success btn-block" id="completeSaleBtn" disabled>Complete Sale</button>
-            <button type="button" onclick="clearCart()" class="btn btn-danger btn-block" style="margin-top: 10px;">Clear Cart</button>
+            <button type="button" onclick="completeSale()" class="btn btn-success btn-block" id="completeSaleBtn" disabled>
+                Complete Sale
+            </button>
+            <button type="button" onclick="clearCart()" class="btn btn-danger btn-block" style="margin-top: 10px;">
+                Clear Cart
+            </button>
         </form>
     </div>
 </div>
 
 <script>
 let cart = [];
+let currentSubtotal = 0;
+let currentDiscount = 0;
 let currentTotal = 0;
 
 function addToCart(id, name, price, stock) {
@@ -182,24 +227,29 @@ function updateCartItemQuantity(id, newQty) {
 
 function updateCart() {
     const cartContainer = document.getElementById('cartItems');
+    const cartSubtotal = document.getElementById('cartSubtotal');
     const cartTotal = document.getElementById('cartTotal');
     const completeBtn = document.getElementById('completeSaleBtn');
     
     if (cart.length === 0) {
         cartContainer.innerHTML = '<p style="text-align: center; color: var(--secondary); padding: 40px;">Cart is empty</p>';
-        cartTotal.textContent = '<?php echo CURRENCY; ?> 0.00';
+        cartSubtotal.textContent = formatCurrency(0);
+        cartTotal.textContent = formatCurrency(0);
         completeBtn.disabled = true;
+        currentSubtotal = 0;
+        currentDiscount = 0;
         currentTotal = 0;
+        updateDiscount();
         calculateChange();
         return;
     }
     
     let html = '';
-    let total = 0;
+    let subtotal = 0;
     
     cart.forEach(item => {
-        const subtotal = item.quantity * item.unit_price;
-        total += subtotal;
+        const itemSubtotal = item.quantity * item.unit_price;
+        subtotal += itemSubtotal;
         
         html += '<div class="cart-item">';
         html += '<div style="flex: 1;">';
@@ -213,21 +263,64 @@ function updateCart() {
         html += 'style="width: 70px; padding: 5px; text-align: center; border: 2px solid var(--border); border-radius: 5px; font-weight: bold;" />';
         html += '<button onclick="removeFromCart(' + item.product_id + ')" class="btn btn-sm btn-danger" type="button">×</button>';
         html += '</div></div>';
-        html += '<div style="text-align: right; font-weight: bold; padding: 5px 0;">' + formatCurrency(subtotal) + '</div>';
+        html += '<div style="text-align: right; font-weight: bold; padding: 5px 0;">' + formatCurrency(itemSubtotal) + '</div>';
     });
     
     cartContainer.innerHTML = html;
-    cartTotal.textContent = formatCurrency(total);
-    currentTotal = total;
-    completeBtn.disabled = false;
+    cartSubtotal.textContent = formatCurrency(subtotal);
+    currentSubtotal = subtotal;
+    
+    updateDiscount();
     calculateChange();
+}
+
+function updateDiscount() {
+    const discountType = document.getElementById('discountType').value;
+    const discountValueInput = document.getElementById('discountValue');
+    const discountDisplay = document.getElementById('discountDisplay');
+    const discountAmountSpan = document.getElementById('discountAmount');
+    const cartTotal = document.getElementById('cartTotal');
+    
+    // Enable/disable discount value input
+    discountValueInput.disabled = discountType === 'none';
+    
+    if (discountType === 'none' || currentSubtotal === 0) {
+        discountDisplay.style.display = 'none';
+        currentDiscount = 0;
+        currentTotal = currentSubtotal;
+        cartTotal.textContent = formatCurrency(currentTotal);
+        return;
+    }
+    
+    const discountValue = parseFloat(discountValueInput.value) || 0;
+    let discountAmount = 0;
+    
+    if (discountType === 'percentage') {
+        // Limit percentage to 0-100
+        const percentage = Math.min(Math.max(discountValue, 0), 100);
+        discountValueInput.value = percentage;
+        discountAmount = (currentSubtotal * percentage) / 100;
+    } else if (discountType === 'fixed') {
+        // Limit fixed amount to subtotal
+        discountAmount = Math.min(Math.max(discountValue, 0), currentSubtotal);
+        discountValueInput.value = discountAmount;
+    }
+    
+    currentDiscount = discountAmount;
+    currentTotal = Math.max(currentSubtotal - discountAmount, 0);
+    
+    discountAmountSpan.textContent = formatCurrency(discountAmount * -1);
+    cartTotal.textContent = formatCurrency(currentTotal);
+    discountDisplay.style.display = 'block';
 }
 
 function clearCart() {
     if (confirm('Clear all items from cart?')) {
         cart = [];
-        updateCart();
+        document.getElementById('discountType').value = 'none';
+        document.getElementById('discountValue').value = '';
         document.getElementById('receivedAmount').value = '';
+        updateCart();
     }
 }
 
@@ -288,6 +381,12 @@ function completeSale() {
     
     const paymentMethod = document.getElementById('paymentMethod').value;
     const receivedAmount = parseFloat(document.getElementById('receivedAmount').value) || 0;
+    const discountType = document.getElementById('discountType').value;
+    const discountValue = parseFloat(document.getElementById('discountValue').value) || 0;
+    
+    // Set hidden discount values
+    document.getElementById('discountAmountInput').value = currentDiscount;
+    document.getElementById('discountPercentInput').value = discountType === 'percentage' ? discountValue : 0;
     
     if (paymentMethod === 'cash') {
         if (receivedAmount === 0) {
@@ -302,19 +401,39 @@ function completeSale() {
         }
         
         const change = receivedAmount - currentTotal;
-        if (!confirm('Total: ' + formatCurrency(currentTotal) + '\nReceived: ' + formatCurrency(receivedAmount) + '\nChange: ' + formatCurrency(change) + '\n\nComplete this sale?')) {
+        let confirmMessage = 'Subtotal: ' + formatCurrency(currentSubtotal) + '\n';
+        
+        if (currentDiscount > 0) {
+            confirmMessage += 'Discount: -' + formatCurrency(currentDiscount) + '\n';
+        }
+        
+        confirmMessage += 'Total: ' + formatCurrency(currentTotal) + '\n';
+        confirmMessage += 'Received: ' + formatCurrency(receivedAmount) + '\n';
+        confirmMessage += 'Change: ' + formatCurrency(change) + '\n\n';
+        confirmMessage += 'Complete this sale?';
+        
+        if (!confirm(confirmMessage)) {
             return;
         }
     } else {
-        if (!confirm('Total: ' + formatCurrency(currentTotal) + '\nPayment Method: ' + paymentMethod.toUpperCase() + '\n\nComplete this sale?')) {
+        let confirmMessage = 'Subtotal: ' + formatCurrency(currentSubtotal) + '\n';
+        
+        if (currentDiscount > 0) {
+            confirmMessage += 'Discount: -' + formatCurrency(currentDiscount) + '\n';
+        }
+        
+        confirmMessage += 'Total: ' + formatCurrency(currentTotal) + '\n';
+        confirmMessage += 'Payment Method: ' + paymentMethod.toUpperCase() + '\n\n';
+        confirmMessage += 'Complete this sale?';
+        
+        if (!confirm(confirmMessage)) {
             return;
         }
     }
     
-    const total = cart.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
-    
     document.getElementById('cartData').value = JSON.stringify(cart);
-    document.getElementById('totalAmount').value = total;
+    document.getElementById('totalAmount').value = currentSubtotal;
+    document.getElementById('finalAmount').value = currentTotal;
     
     document.getElementById('saleForm').submit();
 }

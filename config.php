@@ -1,13 +1,13 @@
 <?php
 // Database Configuration
 define('DB_HOST', 'localhost');
-define('DB_USER', 'kiwanjachapco_theonlyone');
-define('DB_PASS', '@1234Rashid');
-define('DB_NAME', 'kiwanjachapco_theonlyone');
+define('DB_USER', 'root');
+define('DB_PASS', '');
+define('DB_NAME', 'hsms');
 
 // System Configuration
 define('SITE_NAME', 'Hardware Store Management System'); // Full name
-define('SITE_ABBR', 'ONLYONE-SYSTEM'); // Short name/logo
+define('SITE_ABBR', 'HSMS-SYSTEM'); // Short name/logo
 define('CURRENCY', 'TZS'); // Currency
 // Session Configuration
 ini_set('session.cookie_httponly', 1);

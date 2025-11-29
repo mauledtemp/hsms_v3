@@ -2,14 +2,20 @@
 $page_title = 'Dashboard';
 include 'header.php';
 
-// Auto-migrate database for profit tracking
+// Auto-migrate database for discount tracking
 $conn = getDBConnection();
-$columns_check = $conn->query("SHOW COLUMNS FROM sales LIKE 'total_profit'");
+$columns_check = $conn->query("SHOW COLUMNS FROM sales LIKE 'discount_amount'");
 if ($columns_check->num_rows == 0) {
+    $conn->query("ALTER TABLE sales ADD COLUMN discount_amount DECIMAL(10,2) DEFAULT 0 AFTER total_amount");
+    $conn->query("ALTER TABLE sales ADD COLUMN discount_percent DECIMAL(5,2) DEFAULT 0 AFTER discount_amount");
+    $conn->query("ALTER TABLE sales ADD COLUMN final_amount DECIMAL(10,2) DEFAULT 0 AFTER discount_amount");
     $conn->query("ALTER TABLE sales ADD COLUMN total_cost DECIMAL(10,2) DEFAULT 0 AFTER total_amount");
     $conn->query("ALTER TABLE sales ADD COLUMN total_profit DECIMAL(10,2) DEFAULT 0 AFTER total_cost");
     $conn->query("ALTER TABLE sale_items ADD COLUMN buying_price DECIMAL(10,2) DEFAULT 0 AFTER unit_price");
     $conn->query("ALTER TABLE sale_items ADD COLUMN profit DECIMAL(10,2) DEFAULT 0 AFTER subtotal");
+    
+    // Update existing records
+    $conn->query("UPDATE sales SET final_amount = total_amount WHERE final_amount = 0");
 }
 
 $today_sales = getTotalSalesToday();
@@ -139,6 +145,7 @@ $profit_data = getProfitData($period);
                     <th>Sale Number</th>
                     <th>Customer</th>
                     <th>Amount</th>
+                    <th>Discount</th>
                     <th>Cashier</th>
                     <th>Date</th>
                     <th>Action</th>
@@ -150,7 +157,16 @@ $profit_data = getProfitData($period);
                     <tr>
                         <td><?php echo $sale['sale_number']; ?></td>
                         <td><?php echo $sale['customer_name'] ?: 'Walk-in'; ?></td>
-                        <td><strong><?php echo formatCurrency($sale['total_amount']); ?></strong></td>
+                        <td><strong><?php echo formatCurrency($sale['final_amount']); ?></strong></td>
+                        <td>
+                            <?php if ($sale['discount_amount'] > 0): ?>
+                                <span style="color: var(--danger); font-weight: bold;">
+                                    -<?php echo formatCurrency($sale['discount_amount']); ?>
+                                </span>
+                            <?php else: ?>
+                                <span style="color: var(--secondary);">-</span>
+                            <?php endif; ?>
+                        </td>
                         <td><?php echo $sale['cashier_name']; ?></td>
                         <td><?php echo date('d M Y, h:i A', strtotime($sale['sale_date'])); ?></td>
                         <td>
@@ -160,7 +176,7 @@ $profit_data = getProfitData($period);
                     <?php endforeach; ?>
                 <?php else: ?>
                     <tr>
-                        <td colspan="6" style="text-align: center; padding: 40px;">No sales recorded yet</td>
+                        <td colspan="7" style="text-align: center; padding: 40px;">No sales recorded yet</td>
                     </tr>
                 <?php endif; ?>
             </tbody>
@@ -296,7 +312,5 @@ if (ctx && typeof Chart !== 'undefined') {
 console.log('No profit data available');
 <?php endif; ?>
 </script>
-
-<?php include 'footer.php'; ?>
 
 <?php include 'footer.php'; ?>

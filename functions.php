@@ -187,12 +187,16 @@ function generateSaleNumber() {
     return 'SALE-' . date('Ymd') . '-' . strtoupper(substr(uniqid(), -6));
 }
 
-function createSale($user_id, $customer_name, $items, $total_amount, $payment_method) {
+function createSale($user_id, $customer_name, $items, $total_amount, $payment_method, $discount_amount = 0, $discount_percent = 0) {
     $conn = getDBConnection();
     $conn->begin_transaction();
     
     try {
         $sale_number = generateSaleNumber();
+        
+        // Calculate final amount after discount
+        $final_amount = $total_amount - $discount_amount;
+        if ($final_amount < 0) $final_amount = 0;
         
         // Calculate total cost and profit
         $total_cost = 0;
@@ -208,10 +212,81 @@ function createSale($user_id, $customer_name, $items, $total_amount, $payment_me
             $total_profit += $item_profit;
         }
         
-        // Insert sale
-        $stmt = $conn->prepare("INSERT INTO sales (sale_number, user_id, customer_name, total_amount, total_cost, total_profit, payment_method) VALUES (?, ?, ?, ?, ?, ?, ?)");
-        $stmt->bind_param("sisddds", $sale_number, $user_id, $customer_name, $total_amount, $total_cost, $total_profit, $payment_method);
-        $stmt->execute();
+        // Adjust profit for discount
+        $adjusted_profit = $total_profit - $discount_amount;
+        if ($adjusted_profit < 0) $adjusted_profit = 0;
+        
+        // Check which columns exist in the sales table
+        $result = $conn->query("DESCRIBE sales");
+        $existing_columns = [];
+        while ($row = $result->fetch_assoc()) {
+            $existing_columns[] = $row['Field'];
+        }
+        
+        // Build dynamic SQL based on existing columns
+        $columns = ['sale_number', 'user_id', 'customer_name', 'total_amount', 'payment_method'];
+        $placeholders = ['?', '?', '?', '?', '?'];
+        $bind_types = "sisds"; // string, integer, string, double, string
+        
+        $bind_params = [
+            $sale_number, 
+            $user_id, 
+            $customer_name, 
+            $total_amount, 
+            $payment_method
+        ];
+        
+        // Add discount_amount if column exists
+        if (in_array('discount_amount', $existing_columns)) {
+            $columns[] = 'discount_amount';
+            $placeholders[] = '?';
+            $bind_types .= 'd';
+            $bind_params[] = $discount_amount;
+        }
+        
+        // Add discount_percent if column exists
+        if (in_array('discount_percent', $existing_columns)) {
+            $columns[] = 'discount_percent';
+            $placeholders[] = '?';
+            $bind_types .= 'd';
+            $bind_params[] = $discount_percent;
+        }
+        
+        // Add final_amount if column exists
+        if (in_array('final_amount', $existing_columns)) {
+            $columns[] = 'final_amount';
+            $placeholders[] = '?';
+            $bind_types .= 'd';
+            $bind_params[] = $final_amount;
+        }
+        
+        // Add total_cost if column exists
+        if (in_array('total_cost', $existing_columns)) {
+            $columns[] = 'total_cost';
+            $placeholders[] = '?';
+            $bind_types .= 'd';
+            $bind_params[] = $total_cost;
+        }
+        
+        // Add total_profit if column exists
+        if (in_array('total_profit', $existing_columns)) {
+            $columns[] = 'total_profit';
+            $placeholders[] = '?';
+            $bind_types .= 'd';
+            $bind_params[] = $adjusted_profit;
+        }
+        
+        // Build and execute the dynamic SQL
+        $sql = "INSERT INTO sales (" . implode(', ', $columns) . ") VALUES (" . implode(', ', $placeholders) . ")";
+        $stmt = $conn->prepare($sql);
+        
+        // Dynamic bind_param
+        $stmt->bind_param($bind_types, ...$bind_params);
+        
+        if (!$stmt->execute()) {
+            throw new Exception("Failed to execute sale insert: " . $stmt->error);
+        }
+        
         $sale_id = $conn->insert_id;
         
         // Insert sale items and update stock
@@ -225,29 +300,38 @@ function createSale($user_id, $customer_name, $items, $total_amount, $payment_me
             $profit = ($item['unit_price'] - $buying_price) * $item['quantity'];
             
             $stmt_item->bind_param("iiidddd", $sale_id, $item['product_id'], $item['quantity'], $item['unit_price'], $buying_price, $subtotal, $profit);
-            $stmt_item->execute();
+            
+            if (!$stmt_item->execute()) {
+                throw new Exception("Failed to execute sale item insert: " . $stmt_item->error);
+            }
             
             $stmt_stock->bind_param("ii", $item['quantity'], $item['product_id']);
-            $stmt_stock->execute();
+            
+            if (!$stmt_stock->execute()) {
+                throw new Exception("Failed to update stock: " . $stmt_stock->error);
+            }
             
             // Check if stock is now low after sale
             $new_stock = $product['stock_quantity'] - $item['quantity'];
             $reorder_level = $product['reorder_level'];
             
-            // If stock dropped to or below reorder level, create notification
             if ($new_stock <= $reorder_level && $product['stock_quantity'] > $reorder_level) {
-                // Stock just dropped below reorder level
                 createLowStockNotification($product['product_name'], $new_stock, $reorder_level);
             }
         }
         
         // Create notification for all users
-        createSaleNotification($sale_number, $total_amount, $total_profit, $customer_name);
+        createSaleNotification($sale_number, $final_amount, $adjusted_profit, $customer_name);
         
         $conn->commit();
+        
+        // Log successful sale with discount info
+        error_log("Sale created: $sale_number, Discount: $discount_amount, Final: $final_amount");
+        
         return $sale_number;
     } catch (Exception $e) {
         $conn->rollback();
+        error_log("Sale creation error: " . $e->getMessage());
         return false;
     }
 }
@@ -283,7 +367,7 @@ function getSaleByNumber($sale_id) {
 
 function getTotalSalesToday() {
     $conn = getDBConnection();
-    $result = $conn->query("SELECT COALESCE(SUM(total_amount), 0) as total FROM sales WHERE DATE(sale_date) = CURDATE()");
+    $result = $conn->query("SELECT COALESCE(SUM(final_amount), 0) as total FROM sales WHERE DATE(sale_date) = CURDATE()");
     $row = $result->fetch_assoc();
     return $row['total'];
 }
@@ -297,7 +381,7 @@ function getTotalProfitToday() {
 
 function getTotalSalesThisMonth() {
     $conn = getDBConnection();
-    $result = $conn->query("SELECT COALESCE(SUM(total_amount), 0) as total FROM sales WHERE MONTH(sale_date) = MONTH(CURDATE()) AND YEAR(sale_date) = YEAR(CURDATE())");
+    $result = $conn->query("SELECT COALESCE(SUM(final_amount), 0) as total FROM sales WHERE MONTH(sale_date) = MONTH(CURDATE()) AND YEAR(sale_date) = YEAR(CURDATE())");
     $row = $result->fetch_assoc();
     return $row['total'];
 }
@@ -330,7 +414,7 @@ function getProfitData($period = 'weekly') {
     switch ($period) {
         case 'weekly':
             // Last 7 days
-            $query = "SELECT DATE(sale_date) as date, COALESCE(SUM(total_profit), 0) as profit, COALESCE(SUM(total_amount), 0) as sales 
+            $query = "SELECT DATE(sale_date) as date, COALESCE(SUM(total_profit), 0) as profit, COALESCE(SUM(final_amount), 0) as sales 
                       FROM sales 
                       WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
                       GROUP BY DATE(sale_date)
@@ -339,7 +423,7 @@ function getProfitData($period = 'weekly') {
             
         case 'monthly':
             // Last 30 days
-            $query = "SELECT DATE(sale_date) as date, COALESCE(SUM(total_profit), 0) as profit, COALESCE(SUM(total_amount), 0) as sales 
+            $query = "SELECT DATE(sale_date) as date, COALESCE(SUM(total_profit), 0) as profit, COALESCE(SUM(final_amount), 0) as sales 
                       FROM sales 
                       WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
                       GROUP BY DATE(sale_date)
@@ -350,7 +434,7 @@ function getProfitData($period = 'weekly') {
             // Last 12 weeks (grouped by week)
             $query = "SELECT DATE_FORMAT(sale_date, '%Y-%m-%d') as date, 
                       COALESCE(SUM(total_profit), 0) as profit, 
-                      COALESCE(SUM(total_amount), 0) as sales
+                      COALESCE(SUM(final_amount), 0) as sales
                       FROM sales 
                       WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 3 MONTH)
                       GROUP BY YEARWEEK(sale_date)
@@ -361,7 +445,7 @@ function getProfitData($period = 'weekly') {
             // Last 6 months (grouped by month)
             $query = "SELECT DATE_FORMAT(sale_date, '%Y-%m-01') as date, 
                       COALESCE(SUM(total_profit), 0) as profit, 
-                      COALESCE(SUM(total_amount), 0) as sales 
+                      COALESCE(SUM(final_amount), 0) as sales 
                       FROM sales 
                       WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
                       GROUP BY DATE_FORMAT(sale_date, '%Y-%m')
@@ -372,7 +456,7 @@ function getProfitData($period = 'weekly') {
             // Last 12 months (grouped by month)
             $query = "SELECT DATE_FORMAT(sale_date, '%Y-%m-01') as date, 
                       COALESCE(SUM(total_profit), 0) as profit, 
-                      COALESCE(SUM(total_amount), 0) as sales 
+                      COALESCE(SUM(final_amount), 0) as sales 
                       FROM sales 
                       WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
                       GROUP BY DATE_FORMAT(sale_date, '%Y-%m')
@@ -380,7 +464,7 @@ function getProfitData($period = 'weekly') {
             break;
             
         default:
-            $query = "SELECT DATE(sale_date) as date, COALESCE(SUM(total_profit), 0) as profit, COALESCE(SUM(total_amount), 0) as sales 
+            $query = "SELECT DATE(sale_date) as date, COALESCE(SUM(total_profit), 0) as profit, COALESCE(SUM(final_amount), 0) as sales 
                       FROM sales 
                       WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
                       GROUP BY DATE(sale_date)

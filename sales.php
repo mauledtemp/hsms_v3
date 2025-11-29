@@ -47,9 +47,24 @@ $sales = getAllSales(100);
                 <?php echo date('d M Y, h:i A', strtotime($view_sale['sale_date'])); ?>
             </div>
             <div>
-                <strong>Total Amount:</strong><br>
+                <strong>Subtotal:</strong><br>
+                <?php echo formatCurrency($view_sale['total_amount']); ?>
+            </div>
+            <?php if ($view_sale['discount_amount'] > 0): ?>
+            <div>
+                <strong>Discount:</strong><br>
+                <span style="color: var(--danger); font-weight: bold;">
+                    -<?php echo formatCurrency($view_sale['discount_amount']); ?>
+                    <?php if ($view_sale['discount_percent'] > 0): ?>
+                        (<?php echo $view_sale['discount_percent']; ?>%)
+                    <?php endif; ?>
+                </span>
+            </div>
+            <?php endif; ?>
+            <div>
+                <strong>Final Amount:</strong><br>
                 <span style="font-size: 20px; font-weight: bold; color: var(--primary);">
-                    <?php echo formatCurrency($view_sale['total_amount']); ?>
+                    <?php echo formatCurrency($view_sale['final_amount']); ?>
                 </span>
             </div>
             <div>
@@ -92,7 +107,7 @@ $sales = getAllSales(100);
                 <tfoot>
                     <tr style="background: var(--light); font-weight: bold;">
                         <td colspan="4" style="text-align: right;">TOTAL:</td>
-                        <td><?php echo formatCurrency($view_sale['total_amount']); ?></td>
+                        <td><?php echo formatCurrency($view_sale['final_amount']); ?></td>
                     </tr>
                 </tfoot>
             </table>
@@ -111,6 +126,7 @@ $sales = getAllSales(100);
                         <th>Sale Number</th>
                         <th>Customer</th>
                         <th>Amount</th>
+                        <th>Discount</th>
                         <th>Payment</th>
                         <th>Cashier</th>
                         <th>Date</th>
@@ -123,7 +139,16 @@ $sales = getAllSales(100);
                         <tr>
                             <td><?php echo $sale['sale_number']; ?></td>
                             <td><?php echo $sale['customer_name'] ?: 'Walk-in'; ?></td>
-                            <td><strong><?php echo formatCurrency($sale['total_amount']); ?></strong></td>
+                            <td><strong><?php echo formatCurrency($sale['final_amount']); ?></strong></td>
+                            <td>
+                                <?php if ($sale['discount_amount'] > 0): ?>
+                                    <span style="color: var(--danger); font-weight: bold;">
+                                        -<?php echo formatCurrency($sale['discount_amount']); ?>
+                                    </span>
+                                <?php else: ?>
+                                    <span style="color: var(--secondary);">-</span>
+                                <?php endif; ?>
+                            </td>
                             <td><span class="badge badge-primary"><?php echo ucfirst($sale['payment_method']); ?></span></td>
                             <td><?php echo $sale['cashier_name']; ?></td>
                             <td><?php echo date('d M Y, h:i A', strtotime($sale['sale_date'])); ?></td>
@@ -134,7 +159,7 @@ $sales = getAllSales(100);
                         <?php endforeach; ?>
                     <?php else: ?>
                         <tr>
-                            <td colspan="7" style="text-align: center; padding: 40px;">No sales recorded yet</td>
+                            <td colspan="8" style="text-align: center; padding: 40px;">No sales recorded yet</td>
                         </tr>
                     <?php endif; ?>
                 </tbody>

@@ -1,7 +1,13 @@
 <?php
+// Start session and load configuration first
 require_once 'config.php';
 require_once 'functions.php';
-requireLogin();
+
+// Now check if user is logged in
+if (!isset($_SESSION['user_id'])) {
+    header('Location: login.php');
+    exit;
+}
 
 // Auto-create notifications table if it doesn't exist
 $conn = getDBConnection();
@@ -60,7 +66,7 @@ if (function_exists('updateSessionActivity') && function_exists('logActivity')) 
                 <li><a href="inventory.php" class="<?php echo basename($_SERVER['PHP_SELF']) == 'inventory.php' ? 'active' : ''; ?>">📥 Inventory</a></li>
                 <li><a href="sales.php" class="<?php echo basename($_SERVER['PHP_SELF']) == 'sales.php' ? 'active' : ''; ?>">📈 Sales History</a></li>
                 
-                <?php if (isAdmin()): ?>
+                <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin'): ?>
                     <li><a href="users.php" class="<?php echo basename($_SERVER['PHP_SELF']) == 'users.php' ? 'active' : ''; ?>">👥 Users</a></li>
                     <li><a href="activity_report.php" class="<?php echo basename($_SERVER['PHP_SELF']) == 'activity_report.php' ? 'active' : ''; ?>">📊 Activity Report</a></li>
                 <?php endif; ?>
