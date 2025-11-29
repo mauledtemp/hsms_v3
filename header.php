@@ -9,6 +9,7 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 
+
 // Auto-create notifications table if it doesn't exist
 $conn = getDBConnection();
 $table_check = $conn->query("SHOW TABLES LIKE 'notifications'");
@@ -40,6 +41,7 @@ if (function_exists('updateSessionActivity') && function_exists('logActivity')) 
     }
 }
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -64,6 +66,7 @@ if (function_exists('updateSessionActivity') && function_exists('logActivity')) 
                 <li><a href="pos.php" class="<?php echo basename($_SERVER['PHP_SELF']) == 'pos.php' ? 'active' : ''; ?>">💰 Point of Sale</a></li>
                 <li><a href="products.php" class="<?php echo basename($_SERVER['PHP_SELF']) == 'products.php' ? 'active' : ''; ?>">📦 Products</a></li>
                 <li><a href="inventory.php" class="<?php echo basename($_SERVER['PHP_SELF']) == 'inventory.php' ? 'active' : ''; ?>">📥 Inventory</a></li>
+                <li><a href="sales_report.php" class="<?php echo basename($_SERVER['PHP_SELF']) == 'sales_report.php' ? 'active' : ''; ?>">📊 Sales Reports</a></li>
                 <li><a href="sales.php" class="<?php echo basename($_SERVER['PHP_SELF']) == 'sales.php' ? 'active' : ''; ?>">📈 Sales History</a></li>
                 
                 <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin'): ?>

@@ -950,3 +950,158 @@ function validateProductData($data) {
     
     return $errors;
 }
+
+// ==================== SALES REPORT FUNCTIONS ====================
+
+function getSalesReportData($start_date, $end_date, $report_type = 'daily_summary', $cashier_id = 'all') {
+    $conn = getDBConnection();
+    
+    // Build WHERE clause
+    $where_conditions = ["s.sale_date BETWEEN ? AND ?"];
+    $params = [$start_date . ' 00:00:00', $end_date . ' 23:59:59'];
+    $param_types = "ss";
+    
+    if ($cashier_id !== 'all') {
+        $where_conditions[] = "s.user_id = ?";
+        $params[] = $cashier_id;
+        $param_types .= "i";
+    }
+    
+    $where_clause = "WHERE " . implode(" AND ", $where_conditions);
+    
+    // Base query
+    $query = "SELECT s.*, u.full_name as cashier_name 
+              FROM sales s 
+              LEFT JOIN users u ON s.user_id = u.id 
+              $where_clause 
+              ORDER BY s.sale_date DESC";
+    
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param($param_types, ...$params);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    return $result->fetch_all(MYSQLI_ASSOC);
+}
+
+function getProductSalesReport($start_date, $end_date) {
+    $conn = getDBConnection();
+    
+    $query = "SELECT 
+                p.id as product_id,
+                p.product_code,
+                p.product_name,
+                p.category,
+                SUM(si.quantity) as total_quantity,
+                SUM(si.subtotal) as total_revenue,
+                SUM(si.quantity * si.buying_price) as total_cost,
+                SUM(si.profit) as total_profit
+              FROM sale_items si
+              JOIN sales s ON si.sale_id = s.id
+              JOIN products p ON si.product_id = p.id
+              WHERE s.sale_date BETWEEN ? AND ?
+              GROUP BY p.id, p.product_code, p.product_name, p.category
+              ORDER BY total_profit DESC";
+    
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param("ss", $start_date . ' 00:00:00', $end_date . ' 23:59:59');
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    return $result->fetch_all(MYSQLI_ASSOC);
+}
+
+function getCashierPerformanceReport($start_date, $end_date) {
+    $conn = getDBConnection();
+    
+    $query = "SELECT 
+                u.id as cashier_id,
+                u.full_name as cashier_name,
+                COUNT(s.id) as transaction_count,
+                SUM(s.final_amount) as total_sales,
+                AVG(s.final_amount) as average_sale,
+                SUM(s.total_profit) as total_profit,
+                SUM(s.discount_amount) as total_discount
+              FROM sales s
+              JOIN users u ON s.user_id = u.id
+              WHERE s.sale_date BETWEEN ? AND ?
+              GROUP BY u.id, u.full_name
+              ORDER BY total_sales DESC";
+    
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param("ss", $start_date . ' 00:00:00', $end_date . ' 23:59:59');
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    return $result->fetch_all(MYSQLI_ASSOC);
+}
+
+function getDailySalesSummary($start_date, $end_date) {
+    $conn = getDBConnection();
+    
+    $query = "SELECT 
+                DATE(s.sale_date) as sale_date,
+                COUNT(s.id) as transaction_count,
+                SUM(s.final_amount) as total_sales,
+                SUM(s.total_cost) as total_cost,
+                SUM(s.total_profit) as total_profit,
+                SUM(s.discount_amount) as total_discount
+              FROM sales s
+              WHERE s.sale_date BETWEEN ? AND ?
+              GROUP BY DATE(s.sale_date)
+              ORDER BY sale_date DESC";
+    
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param("ss", $start_date . ' 00:00:00', $end_date . ' 23:59:59');
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    return $result->fetch_all(MYSQLI_ASSOC);
+}
+
+function getBestSellingProducts($start_date, $end_date, $limit = 10) {
+    $conn = getDBConnection();
+    
+    $query = "SELECT 
+                p.product_code,
+                p.product_name,
+                p.category,
+                SUM(si.quantity) as total_sold,
+                SUM(si.subtotal) as total_revenue,
+                SUM(si.profit) as total_profit
+              FROM sale_items si
+              JOIN sales s ON si.sale_id = s.id
+              JOIN products p ON si.product_id = p.id
+              WHERE s.sale_date BETWEEN ? AND ?
+              GROUP BY p.id, p.product_code, p.product_name, p.category
+              ORDER BY total_sold DESC
+              LIMIT ?";
+    
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param("ssi", $start_date . ' 00:00:00', $end_date . ' 23:59:59', $limit);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    return $result->fetch_all(MYSQLI_ASSOC);
+}
+
+function getSalesByPaymentMethod($start_date, $end_date) {
+    $conn = getDBConnection();
+    
+    $query = "SELECT 
+                payment_method,
+                COUNT(*) as transaction_count,
+                SUM(final_amount) as total_amount,
+                AVG(final_amount) as average_amount
+              FROM sales
+              WHERE sale_date BETWEEN ? AND ?
+              GROUP BY payment_method
+              ORDER BY total_amount DESC";
+    
+    $stmt = $conn->prepare($query);
+    $stmt->bind_param("ss", $start_date . ' 00:00:00', $end_date . ' 23:59:59');
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    return $result->fetch_all(MYSQLI_ASSOC);
+}
