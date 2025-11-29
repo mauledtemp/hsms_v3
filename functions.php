@@ -724,4 +724,174 @@ function getSessionStats($user_id = null) {
     
     return $result->fetch_assoc();
 }
-?>
+
+// ==================== EXCEL IMPORT FUNCTIONS ====================
+
+
+// ==================== CSV IMPORT FUNCTIONS ====================
+
+function importProductsFromCSV($file_path) {
+    $result = [
+        'success' => false,
+        'imported' => 0,
+        'updated' => 0,
+        'skipped' => 0,
+        'error' => ''
+    ];
+    
+    try {
+        // Check if file exists and is readable
+        if (!file_exists($file_path) || !is_readable($file_path)) {
+            throw new Exception("Cannot read the uploaded file.");
+        }
+        
+        $conn = getDBConnection();
+        $imported = 0;
+        $updated = 0;
+        $skipped = 0;
+        $row_count = 0;
+        
+        // Open the CSV file
+        if (($handle = fopen($file_path, "r")) !== FALSE) {
+            // Skip the header row
+            fgetcsv($handle);
+            
+            // Process each row
+            while (($data = fgetcsv($handle, 1000, ",")) !== FALSE) {
+                $row_count++;
+                
+                // Skip empty rows
+                if (count($data) < 2 || (empty($data[0]) && empty($data[1]))) {
+                    $skipped++;
+                    continue;
+                }
+                
+                // Map CSV columns to variables
+                $product_code = isset($data[0]) ? trim($data[0]) : '';
+                $product_name = isset($data[1]) ? trim($data[1]) : '';
+                $category = isset($data[2]) ? trim($data[2]) : '';
+                $unit = isset($data[3]) ? trim($data[3]) : '';
+                $buying_price = isset($data[4]) ? floatval($data[4]) : 0;
+                $selling_price = isset($data[5]) ? floatval($data[5]) : 0;
+                $stock_quantity = isset($data[6]) ? intval($data[6]) : 0;
+                $reorder_level = isset($data[7]) ? intval($data[7]) : 10;
+                $supplier = isset($data[8]) ? trim($data[8]) : '';
+                
+                // Validate required fields
+                if (empty($product_code)) {
+                    error_log("Skipped row $row_count: Missing product code");
+                    $skipped++;
+                    continue;
+                }
+                
+                if (empty($product_name)) {
+                    error_log("Skipped row $row_count: Missing product name for product code: $product_code");
+                    $skipped++;
+                    continue;
+                }
+                
+                if ($selling_price <= 0) {
+                    error_log("Skipped row $row_count: Invalid selling price for product: $product_code");
+                    $skipped++;
+                    continue;
+                }
+                
+                // Set default values
+                if (empty($unit)) $unit = 'pcs';
+                if ($stock_quantity < 0) $stock_quantity = 0;
+                if ($reorder_level <= 0) $reorder_level = 10;
+                if ($buying_price < 0) $buying_price = 0;
+                
+                // Check if product code already exists
+                $check_stmt = $conn->prepare("SELECT id, product_name FROM products WHERE product_code = ?");
+                $check_stmt->bind_param("s", $product_code);
+                $check_stmt->execute();
+                $check_result = $check_stmt->get_result();
+                
+                if ($check_result->num_rows > 0) {
+                    // Product exists, update it
+                    $existing_product = $check_result->fetch_assoc();
+                    $update_stmt = $conn->prepare("UPDATE products SET product_name = ?, category = ?, unit = ?, buying_price = ?, selling_price = ?, stock_quantity = ?, reorder_level = ?, supplier = ?, updated_at = CURRENT_TIMESTAMP WHERE product_code = ?");
+                    $update_stmt->bind_param("sssddiiss", $product_name, $category, $unit, $buying_price, $selling_price, $stock_quantity, $reorder_level, $supplier, $product_code);
+                    
+                    if ($update_stmt->execute()) {
+                        $updated++;
+                        error_log("Updated product: $product_code - $product_name");
+                    } else {
+                        $skipped++;
+                        error_log("Failed to update product $product_code: " . $update_stmt->error);
+                    }
+                } else {
+                    // Insert new product
+                    $insert_stmt = $conn->prepare("INSERT INTO products (product_code, product_name, category, unit, buying_price, selling_price, stock_quantity, reorder_level, supplier) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                    $insert_stmt->bind_param("ssssddiis", $product_code, $product_name, $category, $unit, $buying_price, $selling_price, $stock_quantity, $reorder_level, $supplier);
+                    
+                    if ($insert_stmt->execute()) {
+                        $imported++;
+                        error_log("Imported new product: $product_code - $product_name");
+                    } else {
+                        $skipped++;
+                        error_log("Failed to insert product $product_code: " . $insert_stmt->error);
+                    }
+                }
+            }
+            fclose($handle);
+        } else {
+            throw new Exception("Could not open the CSV file for reading.");
+        }
+        
+        $result['success'] = true;
+        $result['imported'] = $imported;
+        $result['updated'] = $updated;
+        $result['skipped'] = $skipped;
+        
+        // Log activity
+        if (isset($_SESSION['user_id'])) {
+            logActivity($_SESSION['user_id'], 'product_add', "Imported $imported new products, updated $updated products from CSV", 'products.php');
+        }
+        
+    } catch (Exception $e) {
+        $result['error'] = $e->getMessage();
+        error_log("CSV import error: " . $e->getMessage());
+    }
+    
+    return $result;
+}
+
+function generateSampleCSV() {
+    $filename = 'sample_products_template.csv';
+    
+    try {
+        // Create CSV content
+        $csv_content = "Product Code,Product Name,Category,Unit,Buying Price,Selling Price,Stock Quantity,Reorder Level,Supplier\n";
+        
+        // Sample data
+        $sample_data = [
+            ['PROD001', 'Hammer', 'Tools', 'pcs', '1500.00', '2500.00', '50', '10', 'Tools Supplier'],
+            ['PROD002', 'Screwdriver Set', 'Tools', 'set', '3000.00', '5000.00', '30', '5', 'Tools Supplier'],
+            ['PROD003', 'Nails 1kg', 'Hardware', 'kg', '800.00', '1500.00', '100', '20', 'Hardware Wholesaler'],
+            ['PROD004', 'Paint Brush', 'Painting', 'pcs', '500.00', '1200.00', '40', '10', 'Paint Supplier'],
+            ['PROD005', 'Safety Gloves', 'Safety', 'pair', '1200.00', '2000.00', '60', '15', 'Safety Equipment Co.'],
+            ['PROD006', 'Electric Drill', 'Power Tools', 'pcs', '25000.00', '40000.00', '15', '3', 'Power Tools Ltd'],
+            ['PROD007', 'Measuring Tape', 'Tools', 'pcs', '1500.00', '2800.00', '75', '10', 'Tools Supplier'],
+            ['PROD008', 'Wood Plank 2m', 'Lumber', 'pcs', '4500.00', '7500.00', '25', '5', 'Timber Company'],
+            ['PROD009', 'Paint White 1L', 'Painting', 'ltr', '3500.00', '6000.00', '30', '8', 'Paint Supplier'],
+            ['PROD010', 'Safety Goggles', 'Safety', 'pcs', '800.00', '1800.00', '45', '12', 'Safety Equipment Co.']
+        ];
+        
+        foreach ($sample_data as $data) {
+            $csv_content .= implode(',', $data) . "\n";
+        }
+        
+        // Save to file
+        if (file_put_contents($filename, $csv_content) !== false) {
+            return $filename;
+        } else {
+            throw new Exception("Could not create sample CSV file.");
+        }
+        
+    } catch (Exception $e) {
+        error_log("Sample CSV generation error: " . $e->getMessage());
+        return false;
+    }
+}

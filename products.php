@@ -21,6 +21,24 @@ if ($columns->num_rows == 0) {
     }
 }
 
+// Handle CSV Import
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['import_products'])) {
+    if (isset($_FILES['csv_file']) && $_FILES['csv_file']['error'] === UPLOAD_ERR_OK) {
+        $result = importProductsFromCSV($_FILES['csv_file']['tmp_name']);
+        
+        if ($result['success']) {
+            $message = "Products imported successfully! " . $result['imported'] . " products imported, " . $result['updated'] . " updated, " . $result['skipped'] . " skipped.";
+            $message_type = 'success';
+        } else {
+            $message = "Error importing products: " . $result['error'];
+            $message_type = 'danger';
+        }
+    } else {
+        $message = "Please select a valid CSV file.";
+        $message_type = 'danger';
+    }
+}
+
 // Handle form submissions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['add_product'])) {
@@ -92,6 +110,117 @@ $products = getAllProducts();
 <?php if ($message): ?>
     <div class="alert alert-<?php echo $message_type; ?>"><?php echo $message; ?></div>
 <?php endif; ?>
+
+<!-- CSV Import Section -->
+<div class="card" style="margin-bottom: 30px;">
+    <h2 style="margin-bottom: 20px;">📤 Import Products from CSV</h2>
+    
+    <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+        <h4 style="margin-bottom: 15px;">CSV File Format</h4>
+        <p>Your CSV file should have the following columns in order (comma separated):</p>
+        <table class="file-format-table">
+            <thead>
+                <tr>
+                    <th>Column</th>
+                    <th>Description</th>
+                    <th>Required</th>
+                    <th>Example</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>1 - Product Code</strong></td>
+                    <td>Unique product code</td>
+                    <td>✅ Yes</td>
+                    <td>PROD001</td>
+                </tr>
+                <tr>
+                    <td><strong>2 - Product Name</strong></td>
+                    <td>Product name</td>
+                    <td>✅ Yes</td>
+                    <td>Hammer</td>
+                </tr>
+                <tr>
+                    <td>3 - Category</td>
+                    <td>Product category</td>
+                    <td>❌ Optional</td>
+                    <td>Tools</td>
+                </tr>
+                <tr>
+                    <td>4 - Unit</td>
+                    <td>pcs, kg, ltr, etc</td>
+                    <td>❌ Optional</td>
+                    <td>pcs</td>
+                </tr>
+                <tr>
+                    <td>5 - Buying Price</td>
+                    <td>Cost price</td>
+                    <td>❌ Optional</td>
+                    <td>1500.00</td>
+                </tr>
+                <tr>
+                    <td><strong>6 - Selling Price</strong></td>
+                    <td>Selling price</td>
+                    <td>✅ Yes</td>
+                    <td>2500.00</td>
+                </tr>
+                <tr>
+                    <td>7 - Stock Quantity</td>
+                    <td>Initial stock</td>
+                    <td>❌ Optional</td>
+                    <td>50</td>
+                </tr>
+                <tr>
+                    <td>8 - Reorder Level</td>
+                    <td>Low stock alert level</td>
+                    <td>❌ Optional</td>
+                    <td>10</td>
+                </tr>
+                <tr>
+                    <td>9 - Supplier</td>
+                    <td>Supplier name</td>
+                    <td>❌ Optional</td>
+                    <td>Tools Supplier</td>
+                </tr>
+            </tbody>
+        </table>
+        
+        <div class="tip-box">
+            <strong>💡 Tip:</strong> 
+            <a href="generate_sample.php" style="color: #059669; font-weight: bold;">Download Sample CSV Template</a> 
+            to see the correct format.
+        </div>
+        
+        <div style="background: #eff6ff; border: 1px solid #3b82f6; border-radius: 6px; padding: 12px; margin-top: 15px;">
+            <strong>📝 How to create CSV file:</strong>
+            <ul style="margin: 10px 0 0 20px;">
+                <li>Use <strong>Microsoft Excel</strong>: File → Save As → CSV (Comma delimited)</li>
+                <li>Use <strong>Google Sheets</strong>: File → Download → Comma-separated values (.csv)</li>
+                <li>Use <strong>Any text editor</strong>: Separate values with commas</li>
+            </ul>
+        </div>
+    </div>
+    
+    <form method="POST" enctype="multipart/form-data">
+        <div class="form-row">
+            <div class="form-group" style="flex: 2;">
+                <label>Select CSV File</label>
+                <input type="file" name="csv_file" class="form-control" accept=".csv" required>
+                <small>File format: CSV | Maximum file size: 10MB</small>
+            </div>
+            
+            <div class="form-group" style="flex: 1; display: flex; align-items: flex-end;">
+                <button type="submit" name="import_products" class="btn btn-success">
+                    📤 Import Products
+                </button>
+            </div>
+        </div>
+        
+        <div style="background: #fffbeb; border: 1px solid #fcd34d; border-radius: 6px; padding: 12px; margin-top: 15px;">
+            <strong>⚠️ Note:</strong> Existing products with same product code will be updated. New products will be added.
+        </div>
+    </form>
+</div>
 
 <div class="card" style="margin-bottom: 30px;">
     <h2 style="margin-bottom: 20px;"><?php echo $edit_product ? 'Edit Product' : 'Add New Product'; ?></h2>
@@ -175,7 +304,7 @@ $products = getAllProducts();
 </div>
 
 <div class="card">
-    <h2 style="margin-bottom: 20px;">All Products</h2>
+    <h2 style="margin-bottom: 20px;">All Products (<?php echo count($products); ?>)</h2>
     
     <div class="table-container">
         <table>
